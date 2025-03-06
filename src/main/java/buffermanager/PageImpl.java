@@ -110,7 +110,7 @@ public class PageImpl implements Page {
     }
     
     @Override
-    public int getPageId() {
+    public int getPid() {
         return pageId;
     }
     

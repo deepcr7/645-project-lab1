@@ -32,7 +32,7 @@ public interface Page {
      * 
      * @return The page ID
      */
-    int getPageId();
+    int getPid();
     
     /**
      * Gets the raw byte data for this page.
