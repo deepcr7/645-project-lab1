@@ -3,8 +3,16 @@ package buffermanager;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Tests for the PageImpl implementation.
+ */
 public class PageImplTest {
     
+    /**
+     * Tests basic row insertion and retrieval functionality.
+     * Verifies that rows can be properly stored and retrieved
+     * with data integrity maintained.
+     */
     @Test
     public void testInsertAndGetRow() {
         // Create a new page
@@ -37,36 +45,46 @@ public class PageImplTest {
         assertEquals("Test Movie 2", new String(retrievedRow2.title).trim(), "Movie title should match");
     }
     
-@Test
-public void testPageFull() {
-    // Create a new page
-    PageImpl page = new PageImpl(1);
-    
-    // Calculate how many rows should fit in a page
-    int rowSize = 9 + 30;
-    int headerSize = 8;
-    int maxRows = (PageImpl.PAGE_SIZE - headerSize) / rowSize;
-    
-    // Insert rows until one less than full
-    for (int i = 0; i < maxRows - 1; i++) {
-        Row row = new Row("tt" + String.format("%07d", i), "Movie " + i);
-        int rowId = page.insertRow(row);
-        assertEquals(i, rowId, "Row ID should match insertion order");
-        assertFalse(page.isFull(), "Page should not be full until last row");
+    /**
+     * Tests page capacity limits and full page behavior.
+     * Verifies that a page correctly manages its capacity
+     * and handles attempts to insert beyond capacity.
+     */
+    @Test
+    public void testPageFull() {
+        // Create a new page
+        PageImpl page = new PageImpl(1);
+        
+        // Calculate how many rows should fit in a page
+        int rowSize = 9 + 30;
+        int headerSize = 8;
+        int maxRows = (PageImpl.PAGE_SIZE - headerSize) / rowSize;
+        
+        // Insert rows until one less than full
+        for (int i = 0; i < maxRows - 1; i++) {
+            Row row = new Row("tt" + String.format("%07d", i), "Movie " + i);
+            int rowId = page.insertRow(row);
+            assertEquals(i, rowId, "Row ID should match insertion order");
+            assertFalse(page.isFull(), "Page should not be full until last row");
+        }
+        
+        // Insert the last row that should make the page full
+        Row lastRow = new Row("tt" + String.format("%07d", maxRows - 1), "Movie " + (maxRows - 1));
+        int lastRowId = page.insertRow(lastRow);
+        assertEquals(maxRows - 1, lastRowId, "Last row ID should match insertion order");
+        assertTrue(page.isFull(), "Page should be full after inserting maximum rows");
+        
+        // Try to insert one more row
+        Row extraRow = new Row("ttEXTRA", "Extra Movie");
+        int rowId = page.insertRow(extraRow);
+        assertEquals(-1, rowId, "Should return -1 when inserting into a full page");
     }
     
-    // Insert the last row that should make the page full
-    Row lastRow = new Row("tt" + String.format("%07d", maxRows - 1), "Movie " + (maxRows - 1));
-    int lastRowId = page.insertRow(lastRow);
-    assertEquals(maxRows - 1, lastRowId, "Last row ID should match insertion order");
-    assertTrue(page.isFull(), "Page should be full after inserting maximum rows");
-    
-    // Try to insert one more row
-    Row extraRow = new Row("ttEXTRA", "Extra Movie");
-    int rowId = page.insertRow(extraRow);
-    assertEquals(-1, rowId, "Should return -1 when inserting into a full page");
-}
-    
+    /**
+     * Tests the handling of requests for non-existent rows.
+     * Ensures that appropriate null responses are returned
+     * for invalid row IDs.
+     */
     @Test
     public void testGetNonExistentRow() {
         // Create a new page
@@ -84,6 +102,10 @@ public void testPageFull() {
         assertNull(row, "Should return null for row beyond row count");
     }
     
+    /**
+     * Tests page ID assignment and retrieval.
+     * Verifies that page IDs are correctly maintained.
+     */
     @Test
     public void testGetPageId() {
         int testPageId = 42;
@@ -91,28 +113,33 @@ public void testPageFull() {
         assertEquals(testPageId, page.getPid(), "Page ID should match constructor argument");
     }
     
-@Test
-public void testGetAndSetData() {
-    // Create a page
-    int testPageId = 5;
-    PageImpl page = new PageImpl(testPageId);
-    
-    // Insert some data
-    page.insertRow(new Row("tt0000001", "Test Movie"));
-    
-    // Get the data
-    byte[] data = page.getData();
-    
-    // Create a new page with the data
-    PageImpl newPage = new PageImpl(0, data);
-    
-    // Check that the page ID was correctly restored from the data
-    assertEquals(testPageId, newPage.getPid(), "Page ID should be restored from data");
-    
-    // Check that the row was correctly restored
-    Row row = newPage.getRow(0);
-    assertNotNull(row, "Row should be restored from data");
-    assertEquals("tt0000001", new String(row.movieId).trim(), "Movie ID should be restored");
-    assertEquals("Test Movie", new String(row.title).trim(), "Movie title should be restored");
-}
+    /**
+     * Tests page serialization and deserialization.
+     * Verifies that pages can be converted to byte arrays
+     * and reconstructed with data integrity maintained.
+     */
+    @Test
+    public void testGetAndSetData() {
+        // Create a page
+        int testPageId = 5;
+        PageImpl page = new PageImpl(testPageId);
+        
+        // Insert some data
+        page.insertRow(new Row("tt0000001", "Test Movie"));
+        
+        // Get the data
+        byte[] data = page.getData();
+        
+        // Create a new page with the data
+        PageImpl newPage = new PageImpl(0, data);
+        
+        // Check that the page ID was correctly restored from the data
+        assertEquals(testPageId, newPage.getPid(), "Page ID should be restored from data");
+        
+        // Check that the row was correctly restored
+        Row row = newPage.getRow(0);
+        assertNotNull(row, "Row should be restored from data");
+        assertEquals("tt0000001", new String(row.movieId).trim(), "Movie ID should be restored");
+        assertEquals("Test Movie", new String(row.title).trim(), "Movie title should be restored");
+    }
 }
