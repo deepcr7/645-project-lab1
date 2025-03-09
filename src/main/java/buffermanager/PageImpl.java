@@ -20,7 +20,6 @@ public class PageImpl implements Page {
     private static final int ROW_SIZE = 39;
     
     // Calculate max rows per page
-    // We subtract HEADER_SIZE from PAGE_SIZE to account for the header
     private static final int MAX_ROWS = (PAGE_SIZE - HEADER_SIZE) / ROW_SIZE;
     
     // The page data as a byte array
@@ -44,16 +43,19 @@ public class PageImpl implements Page {
         buffer.putInt(0);         // Initial row count is 0
     }
     
-    /**
-     * Creates a page from existing data.
-     * 
-     * @param pageId The page ID
-     * @param data The raw page data
-     */
-    public PageImpl(int pageId, byte[] data) {
-        this.pageId = pageId;
-        this.data = Arrays.copyOf(data, PAGE_SIZE);
-    }
+/**
+ * Creates a page from existing data.
+ * 
+ * @param pageId The page ID
+ * @param data The raw page data
+ */
+public PageImpl(int pageId, byte[] data) {
+    this.data = Arrays.copyOf(data, PAGE_SIZE);
+    
+    // Read the page ID from the data
+    ByteBuffer buffer = ByteBuffer.wrap(this.data);
+    this.pageId = buffer.getInt(0); // Get the stored pageId
+}
     
     @Override
     public Row getRow(int rowId) {
@@ -105,9 +107,10 @@ public class PageImpl implements Page {
     }
     
     @Override
-    public boolean isFull() {
-        return getRowCount() >= MAX_ROWS;
-    }
+public boolean isFull() {
+    int rowCount = getRowCount();
+    return rowCount >= MAX_ROWS;
+}
     
     @Override
     public int getPid() {

@@ -107,7 +107,7 @@ public class Utilities {
                             throw new RuntimeException("Failed to get back current page");
                         }
                         
-                        // Mark dirty as we're going to insert more rows
+                        // Mark dirty
                         bufferManager.markDirty(currentPageId);
                     }
                 }
