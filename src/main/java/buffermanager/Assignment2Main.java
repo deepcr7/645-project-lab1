@@ -7,9 +7,9 @@ public class Assignment2Main {
     private static final String DATA_FILE = "imdb_database.bin";
     private static final String TITLE_INDEX_FILE = "imdb_title_index.bin";
     private static final String MOVIEID_INDEX_FILE = "imdb_movieid_index.bin";
-    private static final int BUFFER_SIZE = 50000;
+    private static final int BUFFER_SIZE = 100000;
     private static final boolean USE_SAMPLE_DATA = true;
-    private static final int SAMPLE_SIZE = 10000;
+    private static final int SAMPLE_SIZE = 50000;
     private static boolean indexesCreated = false;
 
     private static ExtendedBufferManager bufferManager;
@@ -25,6 +25,13 @@ public class Assignment2Main {
 
         // Run performance tests
         runPerformanceTests();
+
+        try {
+            PlotGenerator.main(null);
+            System.out.println("Performance plots generated successfully.");
+        } catch (Exception e) {
+            System.err.println("Error generating plots: " + e.getMessage());
+        }
 
     }
 

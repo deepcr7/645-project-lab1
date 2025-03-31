@@ -13,9 +13,9 @@ public class PerformanceTest {
     private static final String DATA_FILE = "imdb_database.bin";
     private static final String TITLE_INDEX_FILE = "imdb_title_index.bin";
     private static final String MOVIEID_INDEX_FILE = "imdb_movieid_index.bin";
-    private static final int BUFFER_SIZE = 50000;
+    private static final int BUFFER_SIZE = 100000;
     private static final boolean USE_SAMPLE_DATA = true;
-    private static final int SAMPLE_SIZE = 10000;
+    private static final int SAMPLE_SIZE = 50000;
 
     private static ExtendedBufferManager bufferManager;
     private static BTree<String, Rid> titleIndex;
@@ -136,8 +136,7 @@ public class PerformanceTest {
                         " rows in " + indexScanTime + "ms");
                 double ratio = (directScanTime > 0 && indexScanTime > 0) ? (double) directScanTime / indexScanTime : 0;
 
-                writer.write(selectivity + "," + directScanTime + "," +
-                        indexScanTime + "," + ratio + "\n");
+                writer.write(selectivity + "," + directScanTime + "," + indexScanTime + "," + ratio + "\n");
             }
         } catch (IOException e) {
             System.err.println("Error writing results: " + e.getMessage());
