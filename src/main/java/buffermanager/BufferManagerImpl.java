@@ -3,29 +3,29 @@ package buffermanager;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;  
+import java.nio.ByteBuffer;
 import java.util.*;
 
 public class BufferManagerImpl extends BufferManager {
-    
+
     private class Frame {
         Page page;
         boolean dirty;
         int pinCount;
-        
+
         Frame(Page page) {
             this.page = page;
             this.dirty = false;
             this.pinCount = 1;
         }
     }
-    
+
     private final String filename;
     private final Frame[] bufferPool;
     private final Map<Integer, Integer> pageTable;
     private final LinkedList<Integer> lruList;
     private int nextPageId;
-    
+
     public BufferManagerImpl(int bufferSize, String filename) {
         super(bufferSize);
         this.filename = filename;
@@ -33,7 +33,7 @@ public class BufferManagerImpl extends BufferManager {
         this.pageTable = new HashMap<>();
         this.lruList = new LinkedList<>();
         this.nextPageId = 0;
-        
+
         try {
             File file = new File(filename);
             if (!file.exists()) {
@@ -45,70 +45,65 @@ public class BufferManagerImpl extends BufferManager {
             throw new RuntimeException("Failed to initialize the database file: " + e.getMessage());
         }
     }
-    
-@Override
-public Page getPage(int pageId) {
-    
-    // First, check if the page is already in buffer pool
-    if (pageTable.containsKey(pageId)) {
-        int frameId = pageTable.get(pageId);
-        Frame frame = bufferPool[frameId];
-        
-        // Update LRU list (remove and add to end)
-        lruList.remove(Integer.valueOf(frameId));
-        lruList.add(frameId);
-        
-        // Increment pin count
-        frame.pinCount++;
-        
-        return frame.page;
-    }
-    
-    
-    // Page not in buffer, need to load from disk
-    // Find a free frame or evict a page
-    int frameId = findFreeFrame();
-    if (frameId == -1) {
-        System.out.println("No free frames available for page " + pageId);
-        return null;
-    }
-    
-    
-    // Load page from disk
-    Page page = loadPageFromDisk(pageId);
-    if (page == null) {
-        System.out.println("Failed to load page " + pageId + " from disk");
-        return null;
-    }
-    
-    // Add page to buffer pool
-    Frame newFrame = new Frame(page);
-    bufferPool[frameId] = newFrame;
-    pageTable.put(pageId, frameId);
-    lruList.add(frameId);
-    
-    return page;
-}
-    
+
     @Override
-    public Page createPage() {
-        int pageId = nextPageId++;
-        
+    public Page getPage(int pageId) {
+        // First, check if the page is already in buffer pool
+        if (pageTable.containsKey(pageId)) {
+            int frameId = pageTable.get(pageId);
+            Frame frame = bufferPool[frameId];
+
+            // Update LRU list (remove and add to end)
+            lruList.remove(Integer.valueOf(frameId));
+            lruList.add(frameId);
+
+            // Increment pin count
+            frame.pinCount++;
+
+            return frame.page;
+        }
+
         int frameId = findFreeFrame();
         if (frameId == -1) {
+            // All frames are pinned, return null
             return null;
         }
-        
-        Page page = new PageImpl(pageId);
-        
+
+        // Load page from disk
+        Page page = loadPageFromDisk(pageId);
+        if (page == null) {
+            return null;
+        }
+
+        // Add page to buffer pool
         Frame newFrame = new Frame(page);
         bufferPool[frameId] = newFrame;
         pageTable.put(pageId, frameId);
         lruList.add(frameId);
-        
+
         return page;
     }
-    
+
+    @Override
+    public Page createPage() {
+        int pageId = nextPageId++;
+
+        int frameId = findFreeFrame();
+        if (frameId == -1) {
+            // All frames are pinned, return null
+            return null;
+        }
+
+        Page page = new PageImpl(pageId);
+
+        Frame newFrame = new Frame(page);
+        bufferPool[frameId] = newFrame;
+        pageTable.put(pageId, frameId);
+        lruList.add(frameId);
+
+        return page;
+    }
+
     @Override
     public void markDirty(int pageId) {
         if (pageTable.containsKey(pageId)) {
@@ -116,7 +111,7 @@ public Page getPage(int pageId) {
             bufferPool[frameId].dirty = true;
         }
     }
-    
+
     @Override
     public void unpinPage(int pageId) {
         if (pageTable.containsKey(pageId)) {
@@ -126,90 +121,74 @@ public Page getPage(int pageId) {
             }
         }
     }
-    
-private int findFreeFrame() {
-    // Look for an empty frame
-    for (int i = 0; i < bufferSize; i++) {
-        if (bufferPool[i] == null) {
-            return i;
-        }
-    }
-    
-    
-    // No empty frames, try to evict using LRU
-    for (int frameId : lruList) {
-        Frame frame = bufferPool[frameId];
-        
-        // Can only evict unpinned pages
-        if (frame.pinCount == 0) {
 
-            
-            // Write dirty page to disk before eviction
-            if (frame.dirty) {
-                writePageToDisk(frame.page);
+    private int findFreeFrame() {
+        for (int i = 0; i < bufferSize; i++) {
+            if (bufferPool[i] == null) {
+                return i;
             }
-            
-            // Get the pageId before removing the frame
-            int evictedPageId = frame.page.getPid();
-            
-            // Remove from page table and LRU list
-            pageTable.remove(evictedPageId);
-            lruList.remove(Integer.valueOf(frameId));
-            
-            // The frame is now free to use
-            return frameId;
         }
-    }
-    
-    // All frames are pinned
-    return -1;
-}
-    
-private void writePageToDisk(Page page) {
-    try (RandomAccessFile file = new RandomAccessFile(filename, "rw")) {
-        long offset = (long) page.getPid() * PageImpl.PAGE_SIZE;
-        
-        file.seek(offset);
-        file.write(page.getData());
-    } catch (IOException e) {
-        System.err.println("Failed to write page to disk: " + e.getMessage());
-        throw new RuntimeException("Failed to write page to disk: " + e.getMessage());
-    }
-}
 
-private Page loadPageFromDisk(int pageId) {
-    try (RandomAccessFile file = new RandomAccessFile(filename, "r")) {
-        // Calculate file offset
-        long offset = (long) pageId * PageImpl.PAGE_SIZE;
-        
-        // Check if offset is valid
-        if (offset >= file.length()) {
-            System.out.println("Cannot load page " + pageId + " from disk: offset " + offset + " >= file length " + file.length());
-            return null;
+        for (int frameId : lruList) {
+            Frame frame = bufferPool[frameId];
+
+            if (frame.pinCount == 0) {
+
+                if (frame.dirty) {
+                    writePageToDisk(frame.page);
+                }
+
+                int evictedPageId = frame.page.getPid();
+
+                pageTable.remove(evictedPageId);
+                lruList.remove(Integer.valueOf(frameId));
+
+                return frameId;
+            }
         }
-        
-        // Read page data
-        file.seek(offset);
-        byte[] data = new byte[PageImpl.PAGE_SIZE];
-        int bytesRead = file.read(data);
-        
-        // Check if we read the complete page
-        if (bytesRead != PageImpl.PAGE_SIZE) {
-            return null;
-        }
-        
-        // Read page ID from data
-        int storedPageId = ByteBuffer.wrap(data).getInt(0);
-        
-        // Create page from data
-        Page page = new PageImpl(pageId, data);
-        return page;
-    } catch (IOException e) {
-        System.err.println("Failed to load page from disk: " + e.getMessage());
-        throw new RuntimeException("Failed to load page from disk: " + e.getMessage());
+
+        return -1;
     }
-}
-    
+
+    private void writePageToDisk(Page page) {
+        try (RandomAccessFile file = new RandomAccessFile(filename, "rw")) {
+            long offset = (long) page.getPid() * PageImpl.PAGE_SIZE;
+
+            file.seek(offset);
+            file.write(page.getData());
+        } catch (IOException e) {
+            System.err.println("Failed to write page to disk: " + e.getMessage());
+            throw new RuntimeException("Failed to write page to disk: " + e.getMessage());
+        }
+    }
+
+    private Page loadPageFromDisk(int pageId) {
+        try (RandomAccessFile file = new RandomAccessFile(filename, "r")) {
+            long offset = (long) pageId * PageImpl.PAGE_SIZE;
+
+            // Check if offset is valid
+            if (offset >= file.length()) {
+                return null;
+            }
+
+            file.seek(offset);
+            byte[] data = new byte[PageImpl.PAGE_SIZE];
+            int bytesRead = file.read(data);
+
+            if (bytesRead != PageImpl.PAGE_SIZE) {
+                return null;
+            }
+
+            int storedPageId = ByteBuffer.wrap(data).getInt(0);
+
+            Page page = new PageImpl(pageId, data);
+            return page;
+        } catch (IOException e) {
+            System.err.println("Failed to load page from disk: " + e.getMessage());
+            throw new RuntimeException("Failed to load page from disk: " + e.getMessage());
+        }
+    }
+
     public void flushAll() {
         for (int i = 0; i < bufferSize; i++) {
             if (bufferPool[i] != null && bufferPool[i].dirty) {
@@ -217,5 +196,9 @@ private Page loadPageFromDisk(int pageId) {
                 bufferPool[i].dirty = false;
             }
         }
+    }
+
+    public void force() {
+        flushAll();
     }
 }
