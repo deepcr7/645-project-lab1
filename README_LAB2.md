@@ -1,4 +1,4 @@
-# B+ Tree Indexing System
+# LAB 2 B+ Tree Indexing System
 
 ## Team Members and Contributions
 
