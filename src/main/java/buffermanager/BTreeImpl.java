@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
-    private static final int ORDER = 100;
+    private static final int ORDER = 200;
     private final ExtendedBufferManager bufferManager;
     private final String indexFilename;
     private int rootPageId;
@@ -20,8 +20,6 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
         this.indexFilename = indexFilename;
         this.rootPageId = -1;
         this.isBulkLoading = false;
-
-        // Initialize the B+ tree
         initialize();
     }
 
@@ -430,16 +428,12 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
     @Override
     public Iterator<Rid> search(K key) {
         try {
-
-            // Find the leaf node
             BTreeNode<K> node = findLeafNode(key);
             if (node == null) {
                 return Collections.emptyIterator();
             }
 
             BTreeLeafNode<K> leaf = (BTreeLeafNode<K>) node;
-
-            // Search for the key
             for (int i = 0; i < leaf.getKeys().size(); i++) {
                 if (key.compareTo(leaf.getKeys().get(i)) == 0) {
                     List<Rid> results = new ArrayList<>(leaf.getValues().get(i));
@@ -459,11 +453,50 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
 
     @Override
     public Iterator<Rid> rangeSearch(K startKey, K endKey) {
-        if (startKey.compareTo(endKey) > 0) {
-            throw new IllegalArgumentException("Start key must be less than or equal to end key");
+        List<Rid> results = new ArrayList<>();
+
+        try {
+            BTreeNode<K> startNode = findLeafNode(startKey);
+
+            if (startNode == null) {
+                return results.iterator();
+            }
+
+            BTreeLeafNode<K> leaf = (BTreeLeafNode<K>) startNode;
+            boolean done = false;
+            while (!done && leaf != null) {
+                for (int i = 0; i < leaf.getKeys().size(); i++) {
+                    K key = leaf.getKeys().get(i);
+                    if ((key.compareTo(startKey) >= 0) && (key.compareTo(endKey) <= 0)) {
+                        List<Rid> ridList = leaf.getValues().get(i);
+                        results.addAll(ridList);
+                    }
+                    if (key.compareTo(endKey) > 0) {
+                        done = true;
+                        break;
+                    }
+                }
+                if (!done && leaf.getNextLeafPageId() != -1) {
+                    int nextPageId = leaf.getNextLeafPageId();
+                    bufferManager.unpinPage(indexFilename, leaf.getPageId());
+                    BTreeNode<K> nextNode = getNode(nextPageId);
+                    if (nextNode != null && nextNode.isLeaf()) {
+                        leaf = (BTreeLeafNode<K>) nextNode;
+                    } else {
+                        leaf = null;
+                    }
+                } else {
+                    bufferManager.unpinPage(indexFilename, leaf.getPageId());
+                    leaf = null;
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error in range search: " + e.getMessage());
+            e.printStackTrace();
         }
 
-        return new RangeIterator(startKey, endKey);
+        return results.iterator();
     }
 
     private class RangeIterator implements Iterator<Rid> {
@@ -683,7 +716,6 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
 
     private BTreeNode<K> getRightmostLeafNode() {
         if (rootPageId == -1) {
-            // Initialize the tree
             Page page = bufferManager.createPage(indexFilename);
             if (page == null) {
                 throw new RuntimeException("Failed to create root page for B+ tree");
@@ -759,8 +791,6 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
             saveNode(newRoot);
             saveNode(leaf);
             saveNode(newLeaf);
-
-            // Unpin pages
             bufferManager.unpinPage(indexFilename, newRoot.getPageId());
         } else {
 
@@ -784,8 +814,6 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
                 saveNode(parent);
                 bufferManager.unpinPage(indexFilename, parentId);
             }
-
-            // Save leaf nodes
             saveNode(leaf);
             saveNode(newLeaf);
         }
@@ -795,20 +823,27 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
 
     private void saveNode(BTreeNode<K> node) {
         try {
-
             Page page = bufferManager.getPage(indexFilename, node.getPageId());
             if (page == null) {
-                throw new RuntimeException("Failed to get page when saving node: " + node.getPageId());
+                throw new RuntimeException("Failed to get page for node: " + node.getPageId());
             }
 
             byte[] data = node.serialize();
             page.setData(data);
-
             bufferManager.markDirty(indexFilename, node.getPageId());
+
+            bufferManager.unpinPage(indexFilename, node.getPageId());
+
+            if (node.isLeaf()) {
+                BTreeLeafNode<K> leaf = (BTreeLeafNode<K>) node;
+            } else {
+                BTreeInternalNode<K> internal = (BTreeInternalNode<K>) node;
+                System.out.println(
+                        "Saved internal node " + node.getPageId() + " with " + internal.getKeys().size() + " keys");
+            }
         } catch (Exception e) {
-            System.err.println("ERROR in saveNode: " + e.getMessage());
+            System.err.println("Error saving node " + node.getPageId() + ": " + e.getMessage());
             e.printStackTrace();
-            throw new RuntimeException("Failed to save node: " + e.getMessage());
         }
     }
 
@@ -882,8 +917,6 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
             newNode.setParentPageId(newRoot.getPageId());
 
             rootPageId = newRoot.getPageId();
-
-            // Save all nodes
             saveNode(newRoot);
             saveNode(node);
             saveNode(newNode);
@@ -921,12 +954,9 @@ public class BTreeImpl<K extends Comparable<K>> implements BTree<K, Rid> {
 
                 splitInternalNodeForBulk(parent);
             } else {
-                // Save all nodes
                 saveNode(parent);
                 saveNode(node);
                 saveNode(newNode);
-
-                // Unpin pages
                 bufferManager.unpinPage(indexFilename, parentId);
                 bufferManager.unpinPage(indexFilename, node.getPageId());
                 bufferManager.unpinPage(indexFilename, newNode.getPageId());

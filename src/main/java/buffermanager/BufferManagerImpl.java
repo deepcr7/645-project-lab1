@@ -48,16 +48,11 @@ public class BufferManagerImpl extends BufferManager {
 
     @Override
     public Page getPage(int pageId) {
-        // First, check if the page is already in buffer pool
         if (pageTable.containsKey(pageId)) {
             int frameId = pageTable.get(pageId);
             Frame frame = bufferPool[frameId];
-
-            // Update LRU list (remove and add to end)
             lruList.remove(Integer.valueOf(frameId));
             lruList.add(frameId);
-
-            // Increment pin count
             frame.pinCount++;
 
             return frame.page;
@@ -65,17 +60,12 @@ public class BufferManagerImpl extends BufferManager {
 
         int frameId = findFreeFrame();
         if (frameId == -1) {
-            // All frames are pinned, return null
             return null;
         }
-
-        // Load page from disk
         Page page = loadPageFromDisk(pageId);
         if (page == null) {
             return null;
         }
-
-        // Add page to buffer pool
         Frame newFrame = new Frame(page);
         bufferPool[frameId] = newFrame;
         pageTable.put(pageId, frameId);
@@ -90,7 +80,6 @@ public class BufferManagerImpl extends BufferManager {
 
         int frameId = findFreeFrame();
         if (frameId == -1) {
-            // All frames are pinned, return null
             return null;
         }
 
@@ -165,8 +154,6 @@ public class BufferManagerImpl extends BufferManager {
     private Page loadPageFromDisk(int pageId) {
         try (RandomAccessFile file = new RandomAccessFile(filename, "r")) {
             long offset = (long) pageId * PageImpl.PAGE_SIZE;
-
-            // Check if offset is valid
             if (offset >= file.length()) {
                 return null;
             }

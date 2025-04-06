@@ -57,7 +57,6 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
 
     @Override
     public Page getPage(String filename, int pageId) {
-        // Initialize file page table for this file if not exists
         if (!filePageTable.containsKey(filename)) {
             filePageTable.put(filename, new HashMap<>());
             initializeFile(filename);
@@ -198,8 +197,6 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
                 }
             }
         }
-
-        // All frames are pinned
         return -1;
     }
 
@@ -216,7 +213,6 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
 
     private Page loadPageFromDisk(String filename, int pageId) {
         try (RandomAccessFile file = new RandomAccessFile(filename, "r")) {
-            // Calculate file offset
             long offset = (long) pageId * PageImpl.PAGE_SIZE;
 
             if (offset < 0) {
@@ -265,8 +261,6 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
                 pinnedBefore++;
             }
         }
-
-        // First, identify pages with high pin counts
         for (String filename : filePageTable.keySet()) {
             Map<Integer, Integer> pageTable = filePageTable.get(filename);
             for (Integer pageId : pageTable.keySet()) {
@@ -274,14 +268,11 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
                 if (frameId != null && frameId < bufferPool.length) {
                     Frame frame = bufferPool[frameId];
                     if (frame != null && frame.pinCount > 2) {
-                        // Reduce pin count to 1 for highly pinned pages
                         frame.pinCount = 1;
                     }
                 }
             }
         }
-
-        // Flush all dirty pages to disk
         force();
 
         int freeFrames = 0;
@@ -297,10 +288,7 @@ public class ExtendedBufferManagerImpl extends ExtendedBufferManager {
     }
 
     public void aggressiveCleanup() {
-        // Force flush all dirty pages
         force();
-
-        // Reset pin counts for all pages
         for (int i = 0; i < bufferSize; i++) {
             if (bufferPool[i] != null && bufferPool[i].pinCount > 0) {
                 bufferPool[i].pinCount = 1;

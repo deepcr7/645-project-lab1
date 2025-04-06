@@ -48,6 +48,10 @@ public class BTreeTest {
         }
     }
 
+    /**
+     * Creates 2 pages and inserts 3 movie records into each.
+     * Each record includes a movie ID and a title.
+     */
     private void createTestData() {
         for (int i = 0; i < 2; i++) {
             Page page = bufferManager.createPage(DATA_FILE);
@@ -69,6 +73,11 @@ public class BTreeTest {
         }
     }
 
+    /**
+     * Builds two BTree indexes:
+     * - titleIndex maps titles to their corresponding RIDs.
+     * - movieIdIndex maps movie IDs to their corresponding RIDs.
+     */
     private void buildIndexes() {
         for (int pageId = 0; pageId < 2; pageId++) {
             Page page = bufferManager.getPage(DATA_FILE, pageId);
@@ -110,16 +119,29 @@ public class BTreeTest {
         }
     }
 
+    /**
+     * Test Case C1:
+     * Verifies that the title index file is created after index construction.
+     */
     @Test
     public void testC1_CreateTitleIndex() {
         assertTrue(new File(TITLE_INDEX_FILE).exists(), "Title index file should exist");
     }
 
+    /**
+     * Test Case C2:
+     * Verifies that the movie ID index file is created after index construction.
+     */
     @Test
     public void testC2_CreateMovieIdIndex() {
         assertTrue(new File(MOVIEID_INDEX_FILE).exists(), "MovieId index file should exist");
     }
 
+    /**
+     * Test Case C3:
+     * Performs an exact-match search on the title index for "Movie 3"
+     * and verifies that the retrieved record matches the query.
+     */
     @Test
     public void testC3_SearchSingleKey() {
         String targetTitle = "Movie 3";
@@ -137,6 +159,12 @@ public class BTreeTest {
         bufferManager.unpinPage(DATA_FILE, rid.getPageId());
     }
 
+    /**
+     * Test Case C4:
+     * Performs a range search in the title index from "Movie 1" to "Movie 5"
+     * and verifies that the number of results is correct and that all titles
+     * fall within the specified range.
+     */
     @Test
     public void testC4_SearchKeyRange() {
         String startTitle = "Movie 1";

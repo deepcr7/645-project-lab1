@@ -184,54 +184,53 @@ class BTreeLeafNode<K extends Comparable<K>> extends BTreeNode<K> {
         ByteBuffer buffer = ByteBuffer.allocate(PageImpl.PAGE_SIZE);
 
         try {
-            // Write header
             buffer.putInt(pageId);
             buffer.put((byte) (isLeaf ? 1 : 0));
             buffer.putInt(parentPageId);
 
-            // Limit the number of keys to prevent overflow
-            int maxKeysPerPage = (PageImpl.PAGE_SIZE - 20) / 50;
-            int keysToWrite = Math.min(keys.size(), maxKeysPerPage);
+            int availableSpace = PageImpl.PAGE_SIZE - 20;
 
-            // Write key count and nextLeafPageId
-            buffer.putInt(keysToWrite);
+            int maxKeysToWrite = Math.min(keys.size(), 50);
+
+            buffer.putInt(maxKeysToWrite);
             buffer.putInt(nextLeafPageId);
 
-            // Write keys and values
-            for (int i = 0; i < keysToWrite; i++) {
-                // Limit key size
+            int keysWritten = 0;
+            for (int i = 0; i < keys.size() && keysWritten < maxKeysToWrite; i++) {
                 K key = keys.get(i);
                 String keyStr = key.toString();
-                if (keyStr.length() > 30) {
-                    keyStr = keyStr.substring(0, 30);
+
+                if (keyStr.length() > 100) {
+                    keyStr = keyStr.substring(0, 100);
                 }
                 byte[] keyBytes = keyStr.getBytes();
 
-                if (buffer.remaining() < 4 + keyBytes.length) {
+                List<Rid> ridList = values.get(i);
+                int maxRids = Math.min(ridList.size(), 20);
+                int spaceNeeded = 4 + keyBytes.length + 4 + (maxRids * 8);
+
+                if (buffer.remaining() < spaceNeeded) {
                     break;
                 }
-
                 buffer.putInt(keyBytes.length);
                 buffer.put(keyBytes);
-
-                // Limit values per key
-                List<Rid> ridList = values.get(i);
-                int maxRids = Math.min(ridList.size(), 10);
-
-                if (buffer.remaining() < 4 + maxRids * 8) {
-                    break;
-                }
-
                 buffer.putInt(maxRids);
                 for (int j = 0; j < maxRids; j++) {
                     Rid rid = ridList.get(j);
                     buffer.putInt(rid.getPageId());
                     buffer.putInt(rid.getSlotId());
                 }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
 
+                keysWritten++;
+            }
+
+            if (keysWritten < maxKeysToWrite) {
+                buffer.position(9);
+                buffer.putInt(keysWritten);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error serializing leaf node " + pageId + ": " + e.getMessage());
             buffer.clear();
             buffer.putInt(pageId);
             buffer.put((byte) (isLeaf ? 1 : 0));
@@ -248,60 +247,55 @@ class BTreeLeafNode<K extends Comparable<K>> extends BTreeNode<K> {
         ByteBuffer buffer = ByteBuffer.wrap(data);
 
         try {
-            // Read header
             this.pageId = buffer.getInt();
             this.isLeaf = buffer.get() == 1;
             this.parentPageId = buffer.getInt();
             int keyCount = buffer.getInt();
             this.nextLeafPageId = buffer.getInt();
-
             if (keyCount < 0 || keyCount > 1000) {
-                System.err.println("Invalid key count: " + keyCount);
+                System.err.println("Warning: Invalid key count " + keyCount + " in node " + pageId);
                 keyCount = 0;
             }
-
             keys.clear();
             values.clear();
+            for (int i = 0; i < keyCount && buffer.remaining() >= 8; i++) {
+                try {
+                    int keyLength = buffer.getInt();
+                    if (keyLength <= 0 || keyLength > buffer.remaining()) {
+                        System.err.println("Warning: Invalid key length " + keyLength);
+                        break;
+                    }
+                    byte[] keyBytes = new byte[keyLength];
+                    buffer.get(keyBytes);
+                    String keyStr = new String(keyBytes);
 
-            // Read keys and values
-            for (int i = 0; i < keyCount && buffer.remaining() > 8; i++) {
-                // Read key
-                int keyLength = buffer.getInt();
+                    @SuppressWarnings("unchecked")
+                    K key = (K) keyStr;
+                    keys.add(key);
+                    if (buffer.remaining() < 4)
+                        break;
+                    int ridCount = buffer.getInt();
+                    if (ridCount < 0 || ridCount > 1000 || buffer.remaining() < ridCount * 8) {
+                        System.err.println("Warning: Invalid RID count " + ridCount);
+                        break;
+                    }
+                    List<Rid> ridList = new ArrayList<>();
+                    for (int j = 0; j < ridCount; j++) {
+                        int ridPageId = buffer.getInt();
+                        int ridSlotId = buffer.getInt();
+                        ridList.add(new Rid(ridPageId, ridSlotId));
+                    }
+                    values.add(ridList);
 
-                if (keyLength <= 0 || keyLength > 1000 || keyLength > buffer.remaining()) {
-                    System.err.println("Invalid key length: " + keyLength);
+                } catch (Exception e) {
+                    System.err.println("Error reading key " + i + " in node " + pageId + ": " + e.getMessage());
                     break;
                 }
-
-                byte[] keyBytes = new byte[keyLength];
-                buffer.get(keyBytes);
-                String keyStr = new String(keyBytes);
-
-                @SuppressWarnings("unchecked")
-                K key = (K) keyStr;
-                keys.add(key);
-
-                if (buffer.remaining() < 4)
-                    break;
-                int ridCount = buffer.getInt();
-
-                if (ridCount < 0 || ridCount > 1000 || buffer.remaining() < ridCount * 8) {
-                    break;
-                }
-
-                List<Rid> ridList = new ArrayList<>();
-                for (int j = 0; j < ridCount; j++) {
-                    int pageId = buffer.getInt();
-                    int slotId = buffer.getInt();
-                    ridList.add(new Rid(pageId, slotId));
-                }
-                values.add(ridList);
             }
 
+            
         } catch (Exception e) {
-            System.err.println("ERROR in deserialize: " + e.getMessage());
-            e.printStackTrace();
-
+            System.err.println("Error deserializing node " + pageId + ": " + e.getMessage());
             if (keys == null)
                 keys = new ArrayList<>();
             if (values == null)

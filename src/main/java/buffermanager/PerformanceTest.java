@@ -13,8 +13,8 @@ public class PerformanceTest {
     private static final String DATA_FILE = "imdb_database.bin";
     private static final String TITLE_INDEX_FILE = "imdb_title_index.bin";
     private static final String MOVIEID_INDEX_FILE = "imdb_movieid_index.bin";
-    private static final int BUFFER_SIZE = 100000;
-    private static final boolean USE_SAMPLE_DATA = true;
+    private static final int BUFFER_SIZE = 200000;
+    private static final boolean USE_SAMPLE_DATA = false;
     private static final int SAMPLE_SIZE = 50000;
 
     private static ExtendedBufferManager bufferManager;
@@ -381,19 +381,18 @@ public class PerformanceTest {
     }
 
     private static String[] generateTitleRange(double selectivity) {
-
         if (selectivity <= 0.01) {
-            return new String[] { "A", "Ba" };
+            return new String[] { "$", "9" };
         } else if (selectivity <= 0.05) {
-            return new String[] { "A", "Da" };
+            return new String[] { "$", "C" };
         } else if (selectivity <= 0.1) {
-            return new String[] { "A", "Ga" };
+            return new String[] { "$", "F" };
         } else if (selectivity <= 0.2) {
-            return new String[] { "A", "Ma" };
+            return new String[] { "$", "M" };
         } else if (selectivity <= 0.5) {
-            return new String[] { "A", "Ta" };
+            return new String[] { "$", "T" };
         } else {
-            return new String[] { "A", "Zz" };
+            return new String[] { "$", "Z" };
         }
     }
 
