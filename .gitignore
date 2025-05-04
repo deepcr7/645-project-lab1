@@ -1,5 +1,7 @@
 # IMDB dataset files
 title.basics.tsv
+name.basics.tsv
+title.principals.tsv
 *.tsv.gz
 
 # Compiled class files
