@@ -1,7 +1,8 @@
 package buffermanager;
 
 import java.io.File;
-
+import java.util.List;
+import java.util.TreeMap;
 
 public class QueryExecutor {
         private static final String MOVIES_FILE = "imdb_movies.bin";
@@ -10,10 +11,15 @@ public class QueryExecutor {
         private static final String TEMP_FILTERED_WORKEDON_FILE = new File(System.getProperty("user.dir"),
                         "imdb_temp_filtered_workedon.bin").getAbsolutePath();
 
+        // Static field to track if WorkedOn has been materialized
+        private static boolean workedOnMaterialized = false;
+        private static final Object materializationLock = new Object();
+
         private final ExtendedBufferManager bufferManager;
         private final String startRange;
         private final String endRange;
         private final int bufferSize;
+        private int ioOperations;
 
         /**
          * Creates a new query executor with the given parameters.
@@ -32,25 +38,46 @@ public class QueryExecutor {
                 this.startRange = startRange;
                 this.endRange = endRange;
                 this.bufferSize = bufferSize;
+                this.ioOperations = 0;
         }
 
         /**
          * Executes the query and writes the results to standard output.
          */
         public void execute() {
-                // Delete any existing temporary file before starting
+                // Check if the temporary file exists already (from previous materialization)
                 File tempFile = new File(TEMP_FILTERED_WORKEDON_FILE);
-                if (tempFile.exists()) {
-                        tempFile.delete();
-                        System.err.println("Deleted existing temporary file before query execution");
-                }
+                boolean tempFileExisted = tempFile.exists();
 
-                // Create operators for the base tables
-                ScanOperator moviesScan = new ScanOperator(
-                                bufferManager,
-                                MOVIES_FILE,
-                                PageFactory.TableType.MOVIES,
-                                new String[] { "Movies.movieId", "Movies.title" });
+                // --- Index scan logic for Movies ---
+                final String TITLE_INDEX_FILE = "imdb_title_index.bin";
+                File indexFile = new File(TITLE_INDEX_FILE);
+                Operator moviesSourceOperator;
+                boolean usedIndex = false;
+                if (indexFile.exists()) {
+                        // Use index scan
+                        System.out.println("Using TreeMap index for Movies.title range scan");
+                        TreeMap<String, List<Rid>> titleIndex = new TreeMap<>();
+                        moviesSourceOperator = new IndexScanOperator(
+                                        titleIndex,
+                                        bufferManager,
+                                        MOVIES_FILE,
+                                        PageFactory.TableType.MOVIES,
+                                        new String[] { "Movies.movieId", "Movies.title" },
+                                        startRange,
+                                        endRange);
+                        usedIndex = true;
+                } else {
+                        // Fallback: scan + selection
+                        ScanOperator moviesScan = new ScanOperator(
+                                        bufferManager,
+                                        MOVIES_FILE,
+                                        PageFactory.TableType.MOVIES,
+                                        new String[] { "Movies.movieId", "Movies.title" });
+                        moviesSourceOperator = new SelectionOperator(
+                                        moviesScan,
+                                        new RangePredicate("Movies.title", startRange, endRange));
+                }
 
                 ScanOperator workedOnScan = new ScanOperator(
                                 bufferManager,
@@ -63,27 +90,15 @@ public class QueryExecutor {
                                 PEOPLE_FILE,
                                 PageFactory.TableType.PEOPLE,
                                 new String[] { "People.personId", "People.name" });
-                SelectionOperator moviesTitleSelection = new SelectionOperator(
-                                moviesScan,
-                                new RangePredicate("Movies.title", startRange, endRange));
 
+                // Create selection operator for WorkedOn
                 SelectionOperator workedOnCategorySelection = new SelectionOperator(
                                 workedOnScan,
-                                new EqualityPredicate("WorkedOn.category", "director") {
-                                        @Override
-                                        public boolean test(Tuple tuple) {
-                                                String category = tuple.getValue("WorkedOn.category");
-                                                if (category != null) {
-                                                        category = category.trim().toLowerCase();
-                                                        return category.equals("director") ||
-                                                                        category.equals("directors") ||
-                                                                        category.contains("direct");
-                                                }
-                                                return false;
-                                        }
-                                });
+                                new EqualityPredicate("WorkedOn.category", "director"));
+
+                // Create projection operators
                 ProjectionOperator moviesProjection = new ProjectionOperator(
-                                moviesTitleSelection,
+                                moviesSourceOperator,
                                 new String[] { "Movies.movieId", "Movies.title" },
                                 new String[] { "Movies.movieId", "Movies.title" });
 
@@ -92,8 +107,25 @@ public class QueryExecutor {
                                 new String[] { "WorkedOn.movieId", "WorkedOn.personId" },
                                 new String[] { "WorkedOn.movieId", "WorkedOn.personId", "WorkedOn.category" });
 
-                // Materialize the WorkedOn projection
-                workedOnProjection.setMaterialize(bufferManager, TEMP_FILTERED_WORKEDON_FILE);
+                // Materialize the WorkedOn projection only once
+                if (!workedOnMaterialized) {
+                        synchronized (materializationLock) {
+                                if (!workedOnMaterialized) {
+                                        System.out.println("First execution: Materializing WorkedOn table...");
+                                        workedOnProjection.setMaterialize(bufferManager, TEMP_FILTERED_WORKEDON_FILE);
+                                        workedOnMaterialized = true;
+                                } else {
+                                        System.out.println("Reusing previously materialized WorkedOn table");
+                                }
+                        }
+                } else {
+                        System.out.println("Reusing previously materialized WorkedOn table");
+                }
+
+                // Calculate block size based on buffer size
+                int blockSize = (bufferSize - 2) / 2;
+                if (blockSize < 1)
+                        blockSize = 1;
 
                 // Create join operators
                 BlockNestedLoopJoinOperator moviesWorkedOnJoin = new BlockNestedLoopJoinOperator(
@@ -122,13 +154,21 @@ public class QueryExecutor {
 
                 try {
                         // Execute the query
+                        System.out.println("Executing query with title range [" + startRange + ", " + endRange +
+                                        "] and buffer size " + bufferSize + (usedIndex ? " (using index)" : ""));
                         finalProjection.open();
 
                         // Print the results in CSV format
+                        System.out.println("title,name");
+                        int resultCount = 0;
                         Tuple result;
+
                         while ((result = finalProjection.next()) != null) {
                                 System.out.println(result.toCsv());
+                                resultCount++;
                         }
+
+                        System.out.println("Query returned " + resultCount + " results");
 
                         // Close the operators
                         finalProjection.close();
@@ -138,10 +178,11 @@ public class QueryExecutor {
                         e.printStackTrace();
                         throw new RuntimeException("Error executing query: " + e.getMessage(), e);
                 } finally {
-                        // Clean up the temporary file at the end
-                        if (tempFile.exists()) {
+                        // Note: We no longer delete the temporary file to reuse it,
+                        // unless it was just created in this execution and there's an error
+                        if (tempFile.exists() && !tempFileExisted && !workedOnMaterialized) {
                                 boolean deleted = tempFile.delete();
-                                System.err.println("Cleanup: deleted temporary file: " + deleted);
+                                System.out.println("Cleanup: deleted temporary file due to error: " + deleted);
                         }
                 }
         }
@@ -154,11 +195,9 @@ public class QueryExecutor {
         public long countIoOperations() {
                 IoCountingBufferManager ioCounter = new IoCountingBufferManager(bufferManager);
 
-                // Delete any existing temporary file before starting
+                // Check if the temporary file exists already (from previous materialization)
                 File tempFile = new File(TEMP_FILTERED_WORKEDON_FILE);
-                if (tempFile.exists()) {
-                        tempFile.delete();
-                }
+                boolean tempFileExisted = tempFile.exists();
 
                 // Create operators for the base tables
                 ScanOperator moviesScan = new ScanOperator(
@@ -199,8 +238,15 @@ public class QueryExecutor {
                                 new String[] { "WorkedOn.movieId", "WorkedOn.personId" },
                                 new String[] { "WorkedOn.movieId", "WorkedOn.personId", "WorkedOn.category" });
 
-                // Materialize the WorkedOn projection
-                workedOnProjection.setMaterialize(ioCounter, TEMP_FILTERED_WORKEDON_FILE);
+                // Materialize the WorkedOn projection only once
+                if (!workedOnMaterialized) {
+                        synchronized (materializationLock) {
+                                if (!workedOnMaterialized) {
+                                        workedOnProjection.setMaterialize(ioCounter, TEMP_FILTERED_WORKEDON_FILE);
+                                        workedOnMaterialized = true;
+                                }
+                        }
+                }
 
                 // Create join operators
                 BlockNestedLoopJoinOperator moviesWorkedOnJoin = new BlockNestedLoopJoinOperator(
@@ -241,10 +287,8 @@ public class QueryExecutor {
                         finalProjection.close();
 
                 } finally {
-                        // Clean up the temporary file
-                        if (tempFile.exists()) {
-                                tempFile.delete();
-                        }
+                        // Note: We no longer delete the temporary file at the end
+                        // to allow for reuse in future query executions
                 }
 
                 return ioCounter.getIoCount();

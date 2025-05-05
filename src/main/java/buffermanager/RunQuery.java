@@ -21,8 +21,10 @@ public class RunQuery {
      *             args[2] - buffer size (optional)
      */
     public static void main(String[] args) {
+        System.out.println("RunQuery main() started");
         if (args.length < 2) {
             System.err.println("Usage: run_query start_range end_range [buffer_size]");
+            System.err.println("Example: run_query A Z 1000");
             System.exit(1);
         }
 
@@ -33,6 +35,10 @@ public class RunQuery {
         if (args.length > 2) {
             try {
                 bufferSize = Integer.parseInt(args[2]);
+                if (bufferSize <= 0) {
+                    System.err.println("Buffer size must be positive. Using default: " + DEFAULT_BUFFER_SIZE);
+                    bufferSize = DEFAULT_BUFFER_SIZE;
+                }
             } catch (NumberFormatException e) {
                 System.err.println("Invalid buffer size: " + args[2] + ". Using default: " + DEFAULT_BUFFER_SIZE);
                 bufferSize = DEFAULT_BUFFER_SIZE;
@@ -42,11 +48,29 @@ public class RunQuery {
         // Create buffer manager
         ExtendedBufferManager bufferManager = new ExtendedBufferManagerImpl(bufferSize);
 
+        // Print query details
+        System.out.println("Executing query:");
+        System.out.println("SELECT title, name");
+        System.out.println("FROM Movies, WorkedOn, People");
+        System.out.println("WHERE title >= '" + startRange + "' AND title <= '" + endRange + "'");
+        System.out.println("  AND category = 'director'");
+        System.out.println("  AND Movies.movieId = WorkedOn.movieId");
+        System.out.println("  AND WorkedOn.personId = People.personId");
+        System.out.println();
+        System.out.println("Buffer size: " + bufferSize);
+        System.out.println();
+
         // Create and execute query
         QueryExecutor queryExecutor = new QueryExecutor(bufferManager, startRange, endRange, bufferSize);
 
         try {
+            long startTime = System.currentTimeMillis();
             queryExecutor.execute();
+            long endTime = System.currentTimeMillis();
+            long executionTime = endTime - startTime;
+
+            System.out.println("\nQuery execution completed in " + executionTime + " ms");
+
         } catch (Exception e) {
             System.err.println("Error executing query: " + e.getMessage());
             e.printStackTrace();

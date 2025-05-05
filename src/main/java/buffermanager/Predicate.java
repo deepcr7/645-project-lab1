@@ -106,7 +106,8 @@ class JoinPredicate implements Predicate {
             return false;
         }
 
-        return leftValue.equals(rightValue);
+        // Trim both sides to avoid padding/whitespace issues
+        return leftValue.trim().equals(rightValue.trim());
     }
 
     @Override

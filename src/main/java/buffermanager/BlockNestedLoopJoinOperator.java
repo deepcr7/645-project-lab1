@@ -19,12 +19,15 @@ public class BlockNestedLoopJoinOperator implements Operator {
     private boolean isOpen;
     private Map<String, List<Tuple>> hashTable;
     private List<Tuple> currentBlock;
+    private List<Page> tempPages;
     private int blockSizeInPages;
     private Tuple currentOuterTuple;
     private Tuple currentInnerTuple;
     private List<Tuple> matchingInnerTuples;
     private int currentInnerTupleIndex;
     private boolean endOfOuterRelation;
+    private int currentOuterIndex;
+    private int tupleCounter;
 
     /**
      * Creates a new Block Nested Loop Join operator.
@@ -53,11 +56,17 @@ public class BlockNestedLoopJoinOperator implements Operator {
         this.isOpen = false;
         this.hashTable = new HashMap<>();
         this.currentBlock = new ArrayList<>();
+        this.tempPages = new ArrayList<>();
         // Set block size to (B-C)/2 where B is buffer size and C is number of frames
-        // for input
+        // used for input
         // For simplicity, we'll assume C = 2 (one for inner, one for output)
         this.blockSizeInPages = (bufferSize - 2) / 2;
+        if (this.blockSizeInPages < 1) {
+            this.blockSizeInPages = 1; // Ensure at least one page in the block
+        }
         this.endOfOuterRelation = false;
+        this.currentOuterIndex = 0;
+        this.tupleCounter = 0;
     }
 
     @Override
@@ -72,7 +81,16 @@ public class BlockNestedLoopJoinOperator implements Operator {
         isOpen = true;
         hashTable.clear();
         currentBlock.clear();
+        if (tempPages != null) {
+            releaseTemporaryPages();
+        }
+        tempPages = new ArrayList<>();
         endOfOuterRelation = false;
+        currentOuterIndex = 0;
+        currentOuterTuple = null;
+        currentInnerTuple = null;
+        matchingInnerTuples = null;
+        currentInnerTupleIndex = 0;
 
         // Load the first block of the outer relation
         loadNextBlock();
@@ -97,7 +115,7 @@ public class BlockNestedLoopJoinOperator implements Operator {
             // next outer tuple
             if (currentInnerTuple == null) {
                 // If we've exhausted the current block, load the next block
-                if (currentBlock.isEmpty()) {
+                if (currentOuterIndex >= currentBlock.size()) {
                     if (endOfOuterRelation) {
                         // We've processed all blocks, so we're done
                         return null;
@@ -110,10 +128,13 @@ public class BlockNestedLoopJoinOperator implements Operator {
                     if (currentBlock.isEmpty()) {
                         return null;
                     }
+
+                    currentOuterIndex = 0; // Reset outer index for the new block
                 }
 
                 // Get the next outer tuple from the current block
-                currentOuterTuple = currentBlock.remove(0);
+                currentOuterTuple = currentBlock.get(currentOuterIndex);
+                currentOuterIndex++;
 
                 // Reset the inner relation
                 innerOperator.close();
@@ -127,6 +148,10 @@ public class BlockNestedLoopJoinOperator implements Operator {
 
             // Process all inner tuples for the current outer tuple
             while (currentInnerTuple != null) {
+                System.out.println("JOIN DEBUG: Movies.movieId='" +
+                        currentOuterTuple.getValue("Movies.movieId") +
+                        "' WorkedOn.movieId='" + currentInnerTuple.getValue("WorkedOn.movieId") +
+                        "'");
                 // Check if the tuples match
                 if (joinPredicate.test(currentOuterTuple, currentInnerTuple)) {
                     matchingInnerTuples.add(currentInnerTuple);
@@ -173,19 +198,31 @@ public class BlockNestedLoopJoinOperator implements Operator {
         currentBlock.clear();
         hashTable.clear();
 
+        // Release any existing temporary pages before creating new ones
+        releaseTemporaryPages();
+
+        // Create new temporary pages for this block
+        createTemporaryBlock();
+
         int tupleCount = 0;
+        int maxTuplesPerBlock = blockSizeInPages * 100; // Approximate number of tuples per block
         Tuple tuple;
 
         // Load tuples until we fill the block
-        while (tupleCount < blockSizeInPages * 100 && (tuple = outerOperator.next()) != null) {
+        while (tupleCount < maxTuplesPerBlock && (tuple = outerOperator.next()) != null) {
             currentBlock.add(tuple);
 
             // Add the tuple to the hash table
             String key = tuple.getValue(joinPredicate.getLeftColumnName());
-            if (!hashTable.containsKey(key)) {
-                hashTable.put(key, new ArrayList<>());
+            if (key != null) {
+                if (!hashTable.containsKey(key)) {
+                    hashTable.put(key, new ArrayList<>());
+                }
+                hashTable.get(key).add(tuple);
             }
-            hashTable.get(key).add(tuple);
+
+            // Store tuple in temporary page (conceptually)
+            storeTupleInTemporaryBlock(tuple, tupleCount);
 
             tupleCount++;
         }
@@ -199,14 +236,47 @@ public class BlockNestedLoopJoinOperator implements Operator {
         currentInnerTuple = null;
         matchingInnerTuples = null;
         currentInnerTupleIndex = 0;
+        currentOuterIndex = 0;
+
+        System.out.println("Loaded block with " + tupleCount + " tuples, hash table size: " + hashTable.size());
+    }
+
+    /**
+     * Creates temporary pages for the current block.
+     */
+    private void createTemporaryBlock() {
+        tempPages = new ArrayList<>();
+
+        for (int i = 0; i < blockSizeInPages; i++) {
+            Page tempPage = new PageImpl(i);
+            tempPages.add(tempPage);
+        }
+    }
+
+    /**
+     * Stores a tuple in the temporary block.
+     * This is a conceptual operation - in reality, we'd serialize the tuple
+     * and store it in a temporary page.
+     */
+    private void storeTupleInTemporaryBlock(Tuple tuple, int tupleIndex) {
+        // Calculate which page this tuple belongs to
+        int pageIndex = tupleIndex / 100; // Assuming 100 tuples per page
+
+        // Make sure we have enough pages
+        while (pageIndex >= tempPages.size() && tempPages.size() < blockSizeInPages) {
+            tempPages.add(new PageImpl(tempPages.size()));
+        }
+
+        // In a real implementation, we'd serialize the tuple and store it in the page
+        // For this implementation, we just use the currentBlock list directly
     }
 
     /**
      * Releases all temporary pages used by this operator.
      */
     private void releaseTemporaryPages() {
-        // In a real implementation, we would track all temporary pages
-        // and unpin them here. For this assignment, we'll just assume
-        // they'll be evicted by the buffer manager.
+        // In a real implementation with a buffer manager, we would unpin each
+        // temporary page to allow it to be evicted
+        tempPages.clear();
     }
 }

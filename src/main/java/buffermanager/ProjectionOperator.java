@@ -2,6 +2,8 @@ package buffermanager;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * Operator that projects (selects) specific columns from tuples.
@@ -15,6 +17,8 @@ public class ProjectionOperator implements Operator {
     private ExtendedBufferManager bufferManager;
     private MaterializedTable materializedTable;
     private boolean firstNextCall;
+    private boolean isMaterialized;
+    private int materializedTupleCount;
 
     /**
      * Creates a new projection operator with the given child operator and output
@@ -30,6 +34,8 @@ public class ProjectionOperator implements Operator {
         this.columnIndexes = new int[outputColumnNames.length];
         this.materialize = false;
         this.firstNextCall = true;
+        this.isMaterialized = false;
+        this.materializedTupleCount = 0;
 
         // Map output column names to input column indexes
         for (int i = 0; i < outputColumnNames.length; i++) {
@@ -60,6 +66,13 @@ public class ProjectionOperator implements Operator {
         this.materialize = true;
         this.bufferManager = bufferManager;
         this.tempTableFile = tempTableFile;
+
+        // Create parent directory if it doesn't exist
+        File file = new File(tempTableFile);
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
     }
 
     @Override
@@ -67,6 +80,8 @@ public class ProjectionOperator implements Operator {
         // Open the child operator
         childOperator.open();
         firstNextCall = true;
+        isMaterialized = false;
+        materializedTupleCount = 0;
     }
 
     @Override
@@ -76,10 +91,15 @@ public class ProjectionOperator implements Operator {
             if (firstNextCall) {
                 materializeOutput();
                 firstNextCall = false;
+                isMaterialized = true;
             }
 
             // Then we read from the materialized table
-            return materializedTable.next();
+            if (materializedTable != null) {
+                return materializedTable.next();
+            } else {
+                return null;
+            }
         } else {
             // For on-the-fly projection, we get a tuple from the child and project it
             Tuple inputTuple = childOperator.next();
@@ -116,99 +136,76 @@ public class ProjectionOperator implements Operator {
         String[] outputValues = new String[columnIndexes.length];
 
         for (int i = 0; i < columnIndexes.length; i++) {
-            outputValues[i] = inputValues[columnIndexes[i]];
+            if (columnIndexes[i] < inputValues.length) {
+                outputValues[i] = inputValues[columnIndexes[i]];
+            } else {
+                outputValues[i] = ""; // Default empty value for non-existent columns
+            }
         }
 
         return new Tuple(outputValues, outputColumnNames);
     }
 
     private void materializeOutput() {
-        System.err.println("Starting materialization...");
-        System.err.println("Temporary file: " + tempTableFile);
+        System.out.println("Starting materialization to file: " + tempTableFile);
 
-        // Use absolute path for the temporary file
-        File file = new File(tempTableFile);
-        if (!file.isAbsolute()) {
-            file = file.getAbsoluteFile();
-            tempTableFile = file.getAbsolutePath();
-            System.err.println("Using absolute path: " + tempTableFile);
-        }
-
-        // Ensure directory exists for temporary file
-        File parent = file.getParentFile();
-        if (parent != null && !parent.exists()) {
-            boolean created = parent.mkdirs();
-            System.err.println("Created directory: " + parent.getAbsolutePath() + " - " + created);
-        }
-
-        // Create a new materialized table
-        materializedTable = new MaterializedTable(bufferManager, tempTableFile, outputColumnNames);
-
-        // Open the materialized table
         try {
+            // Delete existing file if it exists
+            File file = new File(tempTableFile);
+            if (file.exists()) {
+                file.delete();
+            }
+
+            // Ensure directory exists
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+
+            // Create a new materialized table
+            materializedTable = new MaterializedTable(bufferManager, tempTableFile, outputColumnNames);
+
+            // Open the materialized table
             materializedTable.open();
-            System.err.println("Materialized table opened successfully");
-        } catch (Exception e) {
-            System.err.println("Error opening materialized table: " + e.getMessage());
-            throw new RuntimeException("Failed to open materialized table", e);
-        }
+            System.out.println("Materialized table opened successfully");
 
-        // Read all tuples from the child operator, project them, and insert them into
-        // the materialized table
-        Tuple inputTuple;
-        int tupleCount = 0;
-        while ((inputTuple = childOperator.next()) != null) {
-            Tuple projectedTuple = projectTuple(inputTuple);
-            materializedTable.insert(projectedTuple);
-            tupleCount++;
-            if (tupleCount % 1000 == 0) {
-                System.err.println("Materialized " + tupleCount + " tuples...");
-            }
-        }
-
-        // Force all pages to disk
-        bufferManager.force(tempTableFile);
-        System.err.println("Forced buffer to disk");
-
-        // Verify file exists
-        file = new File(tempTableFile);
-        if (!file.exists()) {
-            System.err.println("ERROR: Temporary file not created: " + tempTableFile);
-            // Create an empty file to proceed with the query
-            try {
-                boolean created = file.createNewFile();
-                System.err.println("Created empty file: " + created);
-                if (created) {
-                    // Reset the materialized table
-                    materializedTable.reset();
-                    System.err.println("Reset complete after creating empty file");
-                    return;
+            // Read all tuples from the child operator, project them, and insert them into
+            // the materialized table
+            Tuple inputTuple;
+            int tupleCount = 0;
+            while ((inputTuple = childOperator.next()) != null) {
+                Tuple projectedTuple = projectTuple(inputTuple);
+                materializedTable.insert(projectedTuple);
+                tupleCount++;
+                if (tupleCount % 1000000 == 0) {
+                    System.out.println("Materialized " + tupleCount + " tuples...");
                 }
-            } catch (IOException e) {
-                System.err.println("Failed to create empty file: " + e.getMessage());
             }
-            throw new RuntimeException("Temporary file not created: " + tempTableFile);
-        }
+            materializedTupleCount = tupleCount;
+            System.out.println("Materialized " + tupleCount + " tuples total");
 
-        System.err.println("File size before reset: " + file.length() + " bytes");
+            // Force all pages to disk
+            bufferManager.force(tempTableFile);
 
-        // Reset the materialized table for reading
-        try {
+            // Reset the materialized table for reading
             materializedTable.reset();
-            System.err.println("Reset complete - ready to read materialized table");
+            System.out.println("Reset complete - ready to read from materialized table");
+
         } catch (Exception e) {
-            System.err.println("Error resetting materialized table: " + e.getMessage());
-            throw new RuntimeException("Failed to reset materialized table", e);
+            System.err.println("Error during materialization: " + e.getMessage());
+            e.printStackTrace();
+            materializedTable = null;
         }
     }
 
     /**
      * Helper class for materialized tables.
      */
-    private static class MaterializedTable {
+    private class MaterializedTable {
         private final ExtendedBufferManager bufferManager;
         private final String filename;
         private final String[] columnNames;
+        private final int[] columnSizes; // Fixed size for each column
         private int currentPageId;
         private int currentRowId;
         private Page currentPage;
@@ -233,67 +230,42 @@ public class ProjectionOperator implements Operator {
             this.totalPages = 0;
             this.isOpen = false;
 
-            // Ensure the parent directory exists
-            File file = new File(filename);
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
+            // Define fixed sizes for each column (customize as needed)
+            this.columnSizes = new int[columnNames.length];
+            for (int i = 0; i < columnNames.length; i++) {
+                if (columnNames[i].toLowerCase().contains("movieid")) {
+                    columnSizes[i] = 9;
+                } else if (columnNames[i].toLowerCase().contains("personid")) {
+                    columnSizes[i] = 10;
+                } else if (columnNames[i].toLowerCase().contains("category")) {
+                    columnSizes[i] = 20;
+                } else if (columnNames[i].toLowerCase().contains("name")) {
+                    columnSizes[i] = 105;
+                } else if (columnNames[i].toLowerCase().contains("title")) {
+                    columnSizes[i] = 30;
+                } else {
+                    columnSizes[i] = 30; // Default
+                }
             }
         }
 
         public void open() {
-            if (isOpen) {
-                // Already open, nothing to do
-                System.err.println("Table already open, not reopening");
+
+            if (isOpen)
                 return;
-            }
-
-            // Delete the file if it exists to start fresh
             File file = new File(filename);
-            if (file.exists()) {
-                System.err.println("Open: Deleting existing file: " + filename);
-                if (!file.delete()) {
-                    System.err.println("Warning: Failed to delete existing file: " + filename);
-                    // Continue anyway, we'll try to create a new page
-                }
-            }
-
-            // Make sure the parent directory exists
+            if (file.exists())
+                file.delete();
             File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                boolean created = parent.mkdirs();
-                System.err.println("Created parent directory: " + created);
-            }
-
-            // Create the first page
-            try {
-                currentPage = bufferManager.createPage(filename);
-                if (currentPage == null) {
-                    throw new RuntimeException("Failed to create page for materialized table: " + filename);
-                }
-
-                currentPageId = currentPage.getPid();
-                currentRowId = 0;
-                totalPages = 1;
-                isOpen = true;
-
-                System.err.println("Open: Created first page with ID: " + currentPageId);
-
-                // Verify the file was created
-                if (!file.exists()) {
-                    System.err.println("Warning: File not created after bufferManager.createPage");
-                    // Try to touch the file
-                    try {
-                        boolean touched = file.createNewFile();
-                        System.err.println("Touched file: " + touched);
-                    } catch (IOException e) {
-                        System.err.println("Failed to touch file: " + e.getMessage());
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Error creating page: " + e.getMessage());
-                throw new RuntimeException("Failed to create page for materialized table", e);
-            }
+            if (parent != null && !parent.exists())
+                parent.mkdirs();
+            currentPage = bufferManager.createPage(filename);
+            if (currentPage == null)
+                throw new RuntimeException("Failed to create page for materialized table: " + filename);
+            currentPageId = currentPage.getPid();
+            currentRowId = 0;
+            totalPages = 1;
+            isOpen = true;
         }
 
         /**
@@ -302,43 +274,22 @@ public class ProjectionOperator implements Operator {
          * @param tuple The tuple to insert
          */
         public void insert(Tuple tuple) {
-            if (!isOpen) {
+            if (!isOpen)
                 throw new IllegalStateException("Materialized table is not open");
-            }
-
-            // Create a row from the tuple
             Row row = createRowFromTuple(tuple);
-
-            // Insert the row into the current page
             int rowId = currentPage.insertRow(row);
-
-            // If the page is full, create a new page
             if (rowId == -1) {
-                // Mark the current page as dirty and unpin it
                 bufferManager.markDirty(filename, currentPageId);
                 bufferManager.unpinPage(filename, currentPageId);
-
-                // Create a new page
-                try {
-                    currentPage = bufferManager.createPage(filename);
-                    if (currentPage == null) {
-                        throw new RuntimeException("Failed to create page for materialized table");
-                    }
-
-                    currentPageId = currentPage.getPid();
-                    totalPages++;
-
-                    // Try inserting again
-                    rowId = currentPage.insertRow(row);
-                    if (rowId == -1) {
-                        throw new RuntimeException("Failed to insert row into new page");
-                    }
-                } catch (Exception e) {
-                    System.err.println("Error creating new page: " + e.getMessage());
-                    throw new RuntimeException("Failed to create new page", e);
-                }
+                currentPage = bufferManager.createPage(filename);
+                if (currentPage == null)
+                    throw new RuntimeException("Failed to create page for materialized table");
+                currentPageId = currentPage.getPid();
+                totalPages++;
+                rowId = currentPage.insertRow(row);
+                if (rowId == -1)
+                    throw new RuntimeException("Failed to insert row into new page");
             }
-
             currentRowId = rowId;
         }
 
@@ -346,94 +297,42 @@ public class ProjectionOperator implements Operator {
          * Resets the materialized table for reading.
          */
         public void reset() {
-            // If not open, open it
-            if (!isOpen) {
+            if (!isOpen)
                 open();
-                return;
-            }
-
-            // Make sure the current page is properly handled
             if (currentPage != null) {
-                // Flush any pending changes
                 bufferManager.markDirty(filename, currentPageId);
                 bufferManager.unpinPage(filename, currentPageId);
-                bufferManager.force(filename);
                 currentPage = null;
             }
-
-            // Reset to the first page and row
             currentPageId = 0;
             currentRowId = 0;
-
-            // Check if the file exists
             File file = new File(filename);
-            System.err.println("Reset: File exists? " + file.exists());
-            if (file.exists()) {
-                System.err.println("Reset: File size: " + file.length() + " bytes");
-            } else {
+            if (!file.exists())
                 throw new RuntimeException("Temporary file does not exist: " + filename);
-            }
-
-            // Load the first page
-            try {
-                currentPage = bufferManager.getPage(filename, currentPageId);
-                if (currentPage == null) {
-                    throw new RuntimeException("Failed to load first page of materialized table: " + filename);
-                }
-                System.err.println("Reset: Successfully loaded first page");
-            } catch (Exception e) {
-                System.err.println("Error loading first page: " + e.getMessage());
-                throw new RuntimeException("Failed to load first page of materialized table: " + filename, e);
-            }
+            currentPage = bufferManager.getPage(filename, currentPageId);
+            if (currentPage == null)
+                throw new RuntimeException("Failed to load first page of materialized table: " + filename);
         }
 
         public Tuple next() {
-            if (!isOpen) {
+            if (!isOpen)
                 throw new IllegalStateException("Materialized table is not open");
-            }
-
-            // Get the row from the current page
             Row row = currentPage.getRow(currentRowId);
-
-            // If we've reached the end of the page, move to the next page
             if (row == null) {
-                // If this is the last page, we're done
-                if (currentPageId >= totalPages - 1) {
+                if (currentPageId >= totalPages - 1)
                     return null;
-                }
-
-                // Unpin the current page
                 bufferManager.unpinPage(filename, currentPageId);
-
-                // Move to the next page
                 currentPageId++;
                 currentRowId = 0;
-
-                try {
-                    // Load the next page
-                    currentPage = bufferManager.getPage(filename, currentPageId);
-                    if (currentPage == null) {
-                        System.err.println("Warning: Failed to load page " + currentPageId + " of materialized table");
-                        return null; // Just return null instead of throwing an exception
-                    }
-                } catch (Exception e) {
-                    System.err.println("Error loading next page: " + e.getMessage());
-                    return null; // Just return null instead of throwing an exception
-                }
-
-                // Get the row from the new page
-                row = currentPage.getRow(currentRowId);
-                if (row == null) {
+                currentPage = bufferManager.getPage(filename, currentPageId);
+                if (currentPage == null)
                     return null;
-                }
+                row = currentPage.getRow(currentRowId);
+                if (row == null)
+                    return null;
             }
-
-            // Create a tuple from the row
             Tuple tuple = createTupleFromRow(row);
-
-            // Move to the next row
             currentRowId++;
-
             return tuple;
         }
 
@@ -442,63 +341,55 @@ public class ProjectionOperator implements Operator {
          */
         public void close() {
             if (isOpen && currentPage != null) {
-                // Unpin the current page
                 bufferManager.unpinPage(filename, currentPageId);
                 currentPage = null;
             }
-
             isOpen = false;
         }
 
-        /**
-         * Creates a row from a tuple for insertion into the materialized table.
-         * 
-         * @param tuple The tuple to convert to a row
-         * @return The row created from the tuple
-         */
+        // --- Optimized: Only write the projected columns, using correct fixed lengths
+        // ---
         private Row createRowFromTuple(Tuple tuple) {
-            StringBuilder sb = new StringBuilder();
-
-            // Concatenate all values with fixed width
             String[] values = tuple.getValues();
-            for (String value : values) {
-                // Pad or truncate each value to 30 characters
-                String paddedValue = value;
-                if (paddedValue.length() > 30) {
-                    paddedValue = paddedValue.substring(0, 30);
+            byte[] movieId = new byte[9];
+            byte[] rest = new byte[getTotalRestLength()];
+            int restOffset = 0;
+            for (int i = 0; i < columnNames.length; i++) {
+                byte[] valBytes = values[i].getBytes();
+                int len = columnSizes[i];
+                if (columnNames[i].toLowerCase().contains("movieid")) {
+                    System.arraycopy(valBytes, 0, movieId, 0, Math.min(valBytes.length, 9));
+                } else {
+                    System.arraycopy(valBytes, 0, rest, restOffset, Math.min(valBytes.length, len));
+                    restOffset += len;
                 }
-                sb.append(paddedValue);
             }
-
-            // Create a row with the concatenated values
-            String movieId = "mat" + String.format("%06d", currentRowId);
-            return new Row(movieId, sb.toString());
+            return new Row(movieId, rest);
         }
 
-        /**
-         * Creates a tuple from a row read from the materialized table.
-         * 
-         * @param row The row to convert to a tuple
-         * @return The tuple created from the row
-         */
         private Tuple createTupleFromRow(Row row) {
-            // Extract the concatenated values from the row
-            String concatenatedValues = new String(row.title).trim();
-
-            // Split into individual values based on fixed width
             String[] values = new String[columnNames.length];
+            int restOffset = 0;
             for (int i = 0; i < columnNames.length; i++) {
-                int start = i * 30;
-                int end = Math.min(start + 30, concatenatedValues.length());
-
-                if (start < concatenatedValues.length()) {
-                    values[i] = concatenatedValues.substring(start, end).trim();
+                int len = columnSizes[i];
+                if (columnNames[i].toLowerCase().contains("movieid")) {
+                    values[i] = new String(row.movieId).trim();
                 } else {
-                    values[i] = "";
+                    values[i] = new String(row.title, restOffset, len).trim();
+                    restOffset += len;
                 }
             }
-
             return new Tuple(values, columnNames);
+        }
+
+        private int getTotalRestLength() {
+            int total = 0;
+            for (int i = 0; i < columnNames.length; i++) {
+                if (!columnNames[i].toLowerCase().contains("movieid")) {
+                    total += columnSizes[i];
+                }
+            }
+            return total;
         }
     }
 }
