@@ -1,67 +1,72 @@
 package buffermanager;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import javax.imageio.ImageIO;
 
 /**
- * Utility for generating performance charts from the query execution results.
+ * Utility class for generating performance plots for Lab 3.
  */
 public class PlotGenerator {
     private static final int WIDTH = 1000;
     private static final int HEIGHT = 600;
     private static final int MARGIN = 80;
-    private static final String DATA_FILE = "performance_chart_data.csv";
+    private static final String DATA_FILE = "test_results_lab3/performance_chart_data.csv";
+    private static final String PERFORMANCE_DATA_FILE = "test_results_lab3/query_performance.csv";
 
-    public static void main(String[] args) {
-        try {
-            generateIoComparisonPlot();
-            generateRatioPlot();
-            System.out.println("Performance plots generated successfully.");
-        } catch (IOException e) {
-            System.err.println("Error generating plots: " + e.getMessage());
-            e.printStackTrace();
+    public static void main(String[] args) throws IOException {
+        // Create directory if it doesn't exist
+        File resultsDir = new File("test_results_lab3");
+        if (!resultsDir.exists()) {
+            resultsDir.mkdir();
         }
+
+        // Generate IO comparison plot
+        generateIOComparisonPlot();
+
+        // Generate IO Ratio plot
+        generateIORatioPlot();
     }
 
     /**
-     * Generates a plot comparing measured I/O versus estimated I/O for different
-     * selectivity levels.
+     * Generates a plot comparing measured and estimated I/O operations.
      */
-    private static void generateIoComparisonPlot() throws IOException {
+    private static void generateIOComparisonPlot() throws IOException {
+        // Read data from CSV
         List<Double> selectivity = new ArrayList<>();
-        List<Long> measuredIo = new ArrayList<>();
-        List<Long> estimatedIo = new ArrayList<>();
+        List<Long> measuredIO = new ArrayList<>();
+        List<Long> estimatedIO = new ArrayList<>();
 
-        // Read data from the performance data file
         try (BufferedReader reader = new BufferedReader(new FileReader(DATA_FILE))) {
-            String line = reader.readLine(); // Skip header
+            // Skip header
+            String header = reader.readLine();
+            String line;
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split(",");
                 selectivity.add(Double.parseDouble(parts[0]));
-                measuredIo.add(Long.parseLong(parts[1]));
-                estimatedIo.add(Long.parseLong(parts[2]));
+                measuredIO.add(Long.parseLong(parts[1]));
+                estimatedIO.add(Long.parseLong(parts[2]));
             }
         }
 
-        // Create the plot
+        // Create image
         BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
 
-        // Set white background
+        // Fill background
         g.setColor(Color.WHITE);
         g.fillRect(0, 0, WIDTH, HEIGHT);
 
-        // Plot title
+        // Draw title
         g.setColor(Color.BLACK);
         g.setFont(new Font("Arial", Font.BOLD, 20));
         String title = "I/O Operations vs. Selectivity";
@@ -73,82 +78,99 @@ public class PlotGenerator {
         g.drawLine(MARGIN, HEIGHT - MARGIN, WIDTH - MARGIN, HEIGHT - MARGIN); // X-axis
         g.drawLine(MARGIN, HEIGHT - MARGIN, MARGIN, MARGIN); // Y-axis
 
-        // X-axis label
-        g.setFont(new Font("Arial", Font.PLAIN, 16));
-        String xLabel = "Selectivity";
-        int xLabelWidth = g.getFontMetrics().stringWidth(xLabel);
-        g.drawString(xLabel, (WIDTH - xLabelWidth) / 2, HEIGHT - 20);
+        // Label axes
+        g.setFont(new Font("Arial", Font.PLAIN, 14));
+        g.drawString("Selectivity", WIDTH / 2 - 30, HEIGHT - 20);
 
-        // Y-axis label
+        // Rotate for Y-axis label
+        g.translate(20, HEIGHT / 2);
         g.rotate(-Math.PI / 2);
-        String yLabel = "I/O Operations";
-        int yLabelWidth = g.getFontMetrics().stringWidth(yLabel);
-        g.drawString(yLabel, -(HEIGHT + yLabelWidth) / 2, 25);
+        g.drawString("I/O Operations", 0, 0);
         g.rotate(Math.PI / 2);
+        g.translate(-20, -HEIGHT / 2);
 
-        // Calculate scale
+        // Find max values for scaling
         double maxSelectivity = 0;
-        long maxIo = 0;
-
+        long maxIO = 0;
         for (int i = 0; i < selectivity.size(); i++) {
             maxSelectivity = Math.max(maxSelectivity, selectivity.get(i));
-            maxIo = Math.max(maxIo, Math.max(measuredIo.get(i), estimatedIo.get(i)));
+            maxIO = Math.max(maxIO, Math.max(measuredIO.get(i), estimatedIO.get(i)));
         }
 
-        // Add some padding to max values
+        // Round up maxSelectivity to next 0.1
         maxSelectivity = Math.ceil(maxSelectivity * 10) / 10.0;
-        maxIo = (long) (maxIo * 1.1);
+        // Add some padding to maxIO
+        maxIO = (long) (maxIO * 1.1);
 
         // Draw X-axis ticks and labels
         g.setFont(new Font("Arial", Font.PLAIN, 12));
         for (int i = 0; i <= 10; i++) {
-            double value = maxSelectivity * i / 10.0;
-            String label = String.format("%.2f", value);
-            int labelWidth = g.getFontMetrics().stringWidth(label);
+            double tickValue = maxSelectivity * i / 10.0;
             int x = MARGIN + (WIDTH - 2 * MARGIN) * i / 10;
-            g.drawLine(x, HEIGHT - MARGIN, x, HEIGHT - MARGIN + 5);
-            g.drawString(label, x - labelWidth / 2, HEIGHT - MARGIN + 20);
+            int y = HEIGHT - MARGIN;
+            g.drawLine(x, y, x, y + 5);
+            String label = String.format("%.2f", tickValue);
+            int labelWidth = g.getFontMetrics().stringWidth(label);
+            g.drawString(label, x - labelWidth / 2, y + 20);
         }
 
         // Draw Y-axis ticks and labels
         for (int i = 0; i <= 10; i++) {
-            long value = maxIo * i / 10;
-            String label;
-            if (value >= 1000000) {
-                label = String.format("%.1fM", value / 1000000.0);
-            } else if (value >= 1000) {
-                label = String.format("%.1fK", value / 1000.0);
-            } else {
-                label = String.valueOf(value);
-            }
-            int labelWidth = g.getFontMetrics().stringWidth(label);
+            long tickValue = maxIO * i / 10;
+            int x = MARGIN;
             int y = HEIGHT - MARGIN - (HEIGHT - 2 * MARGIN) * i / 10;
-            g.drawLine(MARGIN - 5, y, MARGIN, y);
-            g.drawString(label, MARGIN - 10 - labelWidth, y + 5);
+            g.drawLine(x - 5, y, x, y);
+            String label;
+            if (tickValue >= 1000000) {
+                label = String.format("%.1fM", tickValue / 1000000.0);
+            } else if (tickValue >= 1000) {
+                label = String.format("%.1fK", tickValue / 1000.0);
+            } else {
+                label = String.valueOf(tickValue);
+            }
+            g.drawString(label, x - 10 - g.getFontMetrics().stringWidth(label), y + 5);
         }
 
-        // Plot measured I/O
+        // Draw measured IO data points and lines
         g.setColor(Color.BLUE);
         g.setStroke(new BasicStroke(3));
 
         for (int i = 0; i < selectivity.size() - 1; i++) {
             int x1 = MARGIN + (int) ((selectivity.get(i) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y1 = HEIGHT - MARGIN - (int) ((measuredIo.get(i) / (double) maxIo) * (HEIGHT - 2 * MARGIN));
+            int y1 = HEIGHT - MARGIN - (int) ((measuredIO.get(i) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
             int x2 = MARGIN + (int) ((selectivity.get(i + 1) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y2 = HEIGHT - MARGIN - (int) ((measuredIo.get(i + 1) / (double) maxIo) * (HEIGHT - 2 * MARGIN));
+            int y2 = HEIGHT - MARGIN - (int) ((measuredIO.get(i + 1) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
+
             g.drawLine(x1, y1, x2, y2);
+            g.fillOval(x1 - 4, y1 - 4, 8, 8);
         }
 
-        // Plot estimated I/O
+        if (selectivity.size() > 0) {
+            int lastIndex = selectivity.size() - 1;
+            int x = MARGIN + (int) ((selectivity.get(lastIndex) / maxSelectivity) * (WIDTH - 2 * MARGIN));
+            int y = HEIGHT - MARGIN - (int) ((measuredIO.get(lastIndex) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
+            g.fillOval(x - 4, y - 4, 8, 8);
+        }
+
+        // Draw estimated IO data points and lines
         g.setColor(Color.RED);
         g.setStroke(new BasicStroke(3, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL, 0, new float[] { 9 }, 0));
 
         for (int i = 0; i < selectivity.size() - 1; i++) {
             int x1 = MARGIN + (int) ((selectivity.get(i) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y1 = HEIGHT - MARGIN - (int) ((estimatedIo.get(i) / (double) maxIo) * (HEIGHT - 2 * MARGIN));
+            int y1 = HEIGHT - MARGIN - (int) ((estimatedIO.get(i) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
             int x2 = MARGIN + (int) ((selectivity.get(i + 1) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y2 = HEIGHT - MARGIN - (int) ((estimatedIo.get(i + 1) / (double) maxIo) * (HEIGHT - 2 * MARGIN));
+            int y2 = HEIGHT - MARGIN - (int) ((estimatedIO.get(i + 1) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
+
             g.drawLine(x1, y1, x2, y2);
+            g.fillOval(x1 - 4, y1 - 4, 8, 8);
+        }
+
+        if (selectivity.size() > 0) {
+            int lastIndex = selectivity.size() - 1;
+            int x = MARGIN + (int) ((selectivity.get(lastIndex) / maxSelectivity) * (WIDTH - 2 * MARGIN));
+            int y = HEIGHT - MARGIN - (int) ((estimatedIO.get(lastIndex) / (double) maxIO) * (HEIGHT - 2 * MARGIN));
+            g.fillOval(x - 4, y - 4, 8, 8);
         }
 
         // Add legend
@@ -170,21 +192,23 @@ public class PlotGenerator {
         g.drawString("Estimated I/O", WIDTH - 140, 115);
 
         // Save the plot
-        File outputFile = new File("io_comparison_plot.png");
+        File outputFile = new File("test_results_lab3/io_comparison_plot.png");
         ImageIO.write(image, "png", outputFile);
         System.out.println("Generated I/O comparison plot: " + outputFile.getAbsolutePath());
     }
 
     /**
-     * Generates a plot showing the ratio of measured I/O to estimated I/O.
+     * Generates a plot showing the ratio of measured to estimated I/O.
      */
-    private static void generateRatioPlot() throws IOException {
+    private static void generateIORatioPlot() throws IOException {
+        // Read data from CSV
         List<Double> selectivity = new ArrayList<>();
-        List<Double> ratios = new ArrayList<>();
+        List<Double> ioRatios = new ArrayList<>();
 
-        // Read data from the performance data file
         try (BufferedReader reader = new BufferedReader(new FileReader(DATA_FILE))) {
-            String line = reader.readLine(); // Skip header
+            // Skip header
+            String header = reader.readLine();
+            String line;
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split(",");
                 double sel = Double.parseDouble(parts[0]);
@@ -192,23 +216,24 @@ public class PlotGenerator {
                 long estimated = Long.parseLong(parts[2]);
 
                 selectivity.add(sel);
-                double ratio = estimated > 0 ? (double) measured / estimated : 0;
-                ratios.add(ratio);
+                // Calculate ratio (avoid division by zero)
+                double ratio = (estimated > 0) ? (double) measured / estimated : 0;
+                ioRatios.add(ratio);
             }
         }
 
-        // Create the plot
+        // Create image
         BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
 
-        // Set white background
+        // Fill background
         g.setColor(Color.WHITE);
         g.fillRect(0, 0, WIDTH, HEIGHT);
 
-        // Plot title
+        // Draw title
         g.setColor(Color.BLACK);
         g.setFont(new Font("Arial", Font.BOLD, 20));
-        String title = "Ratio of Measured I/O to Estimated I/O vs. Selectivity";
+        String title = "I/O Ratio (Measured/Estimated) vs. Selectivity";
         int titleWidth = g.getFontMetrics().stringWidth(title);
         g.drawString(title, (WIDTH - titleWidth) / 2, 30);
 
@@ -217,83 +242,130 @@ public class PlotGenerator {
         g.drawLine(MARGIN, HEIGHT - MARGIN, WIDTH - MARGIN, HEIGHT - MARGIN); // X-axis
         g.drawLine(MARGIN, HEIGHT - MARGIN, MARGIN, MARGIN); // Y-axis
 
-        // X-axis label
-        g.setFont(new Font("Arial", Font.PLAIN, 16));
-        String xLabel = "Selectivity";
-        int xLabelWidth = g.getFontMetrics().stringWidth(xLabel);
-        g.drawString(xLabel, (WIDTH - xLabelWidth) / 2, HEIGHT - 20);
+        // Label axes
+        g.setFont(new Font("Arial", Font.PLAIN, 14));
+        g.drawString("Selectivity", WIDTH / 2 - 30, HEIGHT - 20);
 
-        // Y-axis label
+        // Rotate for Y-axis label
+        g.translate(20, HEIGHT / 2);
         g.rotate(-Math.PI / 2);
-        String yLabel = "Ratio (Measured / Estimated)";
-        int yLabelWidth = g.getFontMetrics().stringWidth(yLabel);
-        g.drawString(yLabel, -(HEIGHT + yLabelWidth) / 2, 25);
+        g.drawString("I/O Ratio (Measured/Estimated)", 0, 0);
         g.rotate(Math.PI / 2);
+        g.translate(-20, -HEIGHT / 2);
 
-        // Calculate scale
+        // Find max values for scaling
         double maxSelectivity = 0;
         double maxRatio = 0;
-
         for (int i = 0; i < selectivity.size(); i++) {
             maxSelectivity = Math.max(maxSelectivity, selectivity.get(i));
-            maxRatio = Math.max(maxRatio, ratios.get(i));
+            maxRatio = Math.max(maxRatio, ioRatios.get(i));
         }
 
-        // Add some padding to max values
+        // Round up maxSelectivity to next 0.1
         maxSelectivity = Math.ceil(maxSelectivity * 10) / 10.0;
-        maxRatio = Math.ceil(maxRatio * 10) / 10.0;
-        if (maxRatio < 2.0)
-            maxRatio = 2.0; // Ensure we show at least up to ratio 2.0
+        // Add some padding to maxRatio and ensure we have a reasonable minimum
+        maxRatio = Math.max(2.0, Math.ceil(maxRatio * 10) / 10.0 * 1.1);
 
         // Draw X-axis ticks and labels
         g.setFont(new Font("Arial", Font.PLAIN, 12));
         for (int i = 0; i <= 10; i++) {
-            double value = maxSelectivity * i / 10.0;
-            String label = String.format("%.2f", value);
-            int labelWidth = g.getFontMetrics().stringWidth(label);
+            double tickValue = maxSelectivity * i / 10.0;
             int x = MARGIN + (WIDTH - 2 * MARGIN) * i / 10;
-            g.drawLine(x, HEIGHT - MARGIN, x, HEIGHT - MARGIN + 5);
-            g.drawString(label, x - labelWidth / 2, HEIGHT - MARGIN + 20);
+            int y = HEIGHT - MARGIN;
+            g.drawLine(x, y, x, y + 5);
+            String label = String.format("%.2f", tickValue);
+            int labelWidth = g.getFontMetrics().stringWidth(label);
+            g.drawString(label, x - labelWidth / 2, y + 20);
         }
 
         // Draw Y-axis ticks and labels
         for (int i = 0; i <= 10; i++) {
-            double value = maxRatio * i / 10.0;
-            String label = String.format("%.1f", value);
-            int labelWidth = g.getFontMetrics().stringWidth(label);
+            double tickValue = maxRatio * i / 10.0;
+            int x = MARGIN;
             int y = HEIGHT - MARGIN - (HEIGHT - 2 * MARGIN) * i / 10;
-            g.drawLine(MARGIN - 5, y, MARGIN, y);
-            g.drawString(label, MARGIN - 10 - labelWidth, y + 5);
+            g.drawLine(x - 5, y, x, y);
+            String label = String.format("%.2f", tickValue);
+            g.drawString(label, x - 10 - g.getFontMetrics().stringWidth(label), y + 5);
         }
 
-        // Add a reference line at ratio = 1.0
+        // Draw reference line at ratio = 1.0
         g.setColor(Color.GRAY);
         g.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL, 0, new float[] { 5 }, 0));
-        int y_ratio_1 = HEIGHT - MARGIN - (int) ((1.0 / maxRatio) * (HEIGHT - 2 * MARGIN));
-        g.drawLine(MARGIN, y_ratio_1, WIDTH - MARGIN, y_ratio_1);
+        int yRef = HEIGHT - MARGIN - (int) ((1.0 / maxRatio) * (HEIGHT - 2 * MARGIN));
+        g.drawLine(MARGIN, yRef, WIDTH - MARGIN, yRef);
 
-        // Plot ratio
-        g.setColor(Color.GREEN.darker());
+        // Draw ratio data points and lines
+        g.setColor(Color.GREEN);
         g.setStroke(new BasicStroke(3));
 
         for (int i = 0; i < selectivity.size() - 1; i++) {
             int x1 = MARGIN + (int) ((selectivity.get(i) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y1 = HEIGHT - MARGIN - (int) ((ratios.get(i) / maxRatio) * (HEIGHT - 2 * MARGIN));
+            int y1 = HEIGHT - MARGIN - (int) ((ioRatios.get(i) / maxRatio) * (HEIGHT - 2 * MARGIN));
             int x2 = MARGIN + (int) ((selectivity.get(i + 1) / maxSelectivity) * (WIDTH - 2 * MARGIN));
-            int y2 = HEIGHT - MARGIN - (int) ((ratios.get(i + 1) / maxRatio) * (HEIGHT - 2 * MARGIN));
+            int y2 = HEIGHT - MARGIN - (int) ((ioRatios.get(i + 1) / maxRatio) * (HEIGHT - 2 * MARGIN));
+
             g.drawLine(x1, y1, x2, y2);
+            g.fillOval(x1 - 4, y1 - 4, 8, 8);
         }
 
-        // Add explanatory text
+        if (selectivity.size() > 0) {
+            int lastIndex = selectivity.size() - 1;
+            int x = MARGIN + (int) ((selectivity.get(lastIndex) / maxSelectivity) * (WIDTH - 2 * MARGIN));
+            int y = HEIGHT - MARGIN - (int) ((ioRatios.get(lastIndex) / maxRatio) * (HEIGHT - 2 * MARGIN));
+            g.fillOval(x - 4, y - 4, 8, 8);
+        }
+
+        // Add legend and explanation
+        g.setColor(Color.WHITE);
+        g.fillRect(WIDTH - 300, 60, 260, 100);
         g.setColor(Color.BLACK);
-        g.setFont(new Font("Arial", Font.PLAIN, 12));
-        g.drawString("Ratio = 1.0: Formula perfectly predicts actual I/O", MARGIN + 10, y_ratio_1 - 10);
-        g.drawString("Ratio > 1.0: Actual I/O exceeds predicted I/O", MARGIN + 10, y_ratio_1 - 30);
-        g.drawString("Ratio < 1.0: Actual I/O is less than predicted I/O", MARGIN + 10, y_ratio_1 + 20);
+        g.drawRect(WIDTH - 300, 60, 260, 100);
+
+        g.setColor(Color.GREEN);
+        g.setStroke(new BasicStroke(3));
+        g.drawLine(WIDTH - 280, 80, WIDTH - 230, 80);
+        g.fillOval(WIDTH - 255, 76, 8, 8);
+
+        g.setColor(Color.BLACK);
+        g.drawString("I/O Ratio (Measured/Estimated)", WIDTH - 220, 85);
+
+        g.setColor(Color.GRAY);
+        g.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL, 0, new float[] { 5 }, 0));
+        g.drawLine(WIDTH - 280, 110, WIDTH - 230, 110);
+
+        g.setColor(Color.BLACK);
+        g.drawString("Perfect Estimation (Ratio = 1.0)", WIDTH - 220, 115);
+
+        g.drawString("Ratio > 1: Underestimation", WIDTH - 280, 140);
+        g.drawString("Ratio < 1: Overestimation", WIDTH - 280, 155);
 
         // Save the plot
-        File outputFile = new File("io_ratio_plot.png");
+        File outputFile = new File("test_results_lab3/io_ratio_plot.png");
         ImageIO.write(image, "png", outputFile);
         System.out.println("Generated I/O ratio plot: " + outputFile.getAbsolutePath());
+
+        // Calculate and display statistics
+        double sumRatio = 0;
+        double minRatio = Double.MAX_VALUE;
+        double maxRatioValue = 0;
+        for (double ratio : ioRatios) {
+            sumRatio += ratio;
+            minRatio = Math.min(minRatio, ratio);
+            maxRatioValue = Math.max(maxRatioValue, ratio);
+        }
+        double avgRatio = ioRatios.size() > 0 ? sumRatio / ioRatios.size() : 0;
+
+        System.out.println("I/O Ratio Statistics:");
+        System.out.printf("Average Ratio: %.2f%n", avgRatio);
+        System.out.printf("Min Ratio: %.2f%n", minRatio);
+        System.out.printf("Max Ratio: %.2f%n", maxRatioValue);
+
+        if (avgRatio < 0.9) {
+            System.out.println("The formula tends to overestimate I/O operations.");
+        } else if (avgRatio > 1.1) {
+            System.out.println("The formula tends to underestimate I/O operations.");
+        } else {
+            System.out.println("The formula provides a reasonable estimation of I/O operations.");
+        }
     }
 }

@@ -148,10 +148,6 @@ public class BlockNestedLoopJoinOperator implements Operator {
 
             // Process all inner tuples for the current outer tuple
             while (currentInnerTuple != null) {
-                System.out.println("JOIN DEBUG: Movies.movieId='" +
-                        currentOuterTuple.getValue("Movies.movieId") +
-                        "' WorkedOn.movieId='" + currentInnerTuple.getValue("WorkedOn.movieId") +
-                        "'");
                 // Check if the tuples match
                 if (joinPredicate.test(currentOuterTuple, currentInnerTuple)) {
                     matchingInnerTuples.add(currentInnerTuple);
@@ -205,32 +201,29 @@ public class BlockNestedLoopJoinOperator implements Operator {
         createTemporaryBlock();
 
         int tupleCount = 0;
-        int maxTuplesPerBlock = blockSizeInPages * 100; // Approximate number of tuples per block
+        int maxTuplesPerBlock = blockSizeInPages * 150; // Increased for better utilization
         Tuple tuple;
+
+        long startTime = System.currentTimeMillis();
 
         // Load tuples until we fill the block
         while (tupleCount < maxTuplesPerBlock && (tuple = outerOperator.next()) != null) {
             currentBlock.add(tuple);
 
-            // Add the tuple to the hash table
+            // Add the tuple to the hash table - optimize to reuse lists
             String key = tuple.getValue(joinPredicate.getLeftColumnName());
             if (key != null) {
-                if (!hashTable.containsKey(key)) {
-                    hashTable.put(key, new ArrayList<>());
-                }
-                hashTable.get(key).add(tuple);
+                hashTable.computeIfAbsent(key, k -> new ArrayList<>()).add(tuple);
             }
 
-            // Store tuple in temporary page (conceptually)
+            // Store tuple in temporary block (conceptually)
             storeTupleInTemporaryBlock(tuple, tupleCount);
 
             tupleCount++;
         }
 
         // If we didn't get any tuples, we've reached the end of the outer relation
-        if (tupleCount == 0) {
-            endOfOuterRelation = true;
-        }
+        endOfOuterRelation = (tupleCount == 0);
 
         // Reset the inner relation variables
         currentInnerTuple = null;
@@ -238,7 +231,9 @@ public class BlockNestedLoopJoinOperator implements Operator {
         currentInnerTupleIndex = 0;
         currentOuterIndex = 0;
 
-        System.out.println("Loaded block with " + tupleCount + " tuples, hash table size: " + hashTable.size());
+        long elapsed = System.currentTimeMillis() - startTime;
+        System.out.println("Loaded block with " + tupleCount + " tuples, hash table size: " +
+                hashTable.size() + " in " + elapsed + "ms");
     }
 
     /**

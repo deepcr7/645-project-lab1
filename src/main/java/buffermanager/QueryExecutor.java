@@ -358,4 +358,134 @@ public class QueryExecutor {
                         return ioCount;
                 }
         }
+        // Add this optimization to QueryExecutor.java
+        // Create a new method that avoids materializing the entire WorkedOn table
+
+        public void executeOptimized() {
+                // Create operators for the base tables with optimized approach
+                System.out.println("Executing optimized query with title range [" + startRange + ", " + endRange +
+                                "] and buffer size " + bufferSize);
+
+                // Source operator for Movies - with range selection
+                ScanOperator moviesScan = new ScanOperator(
+                                bufferManager,
+                                MOVIES_FILE,
+                                PageFactory.TableType.MOVIES,
+                                new String[] { "Movies.movieId", "Movies.title" });
+
+                SelectionOperator moviesSelection = new SelectionOperator(
+                                moviesScan,
+                                new RangePredicate("Movies.title", startRange, endRange));
+
+                // Apply projection to movies early
+                ProjectionOperator moviesProjection = new ProjectionOperator(
+                                moviesSelection,
+                                new String[] { "Movies.movieId", "Movies.title" },
+                                new String[] { "Movies.movieId", "Movies.title" });
+
+                // Pre-count how many movies match to give progress information
+                moviesProjection.open();
+                int matchingMovieCount = 0;
+                while (moviesProjection.next() != null) {
+                        matchingMovieCount++;
+                }
+                moviesProjection.close();
+                System.out.println("Found " + matchingMovieCount + " movies in title range: [" +
+                                startRange + " - " + endRange + "]");
+
+                // Reset the movies projection
+                moviesProjection = new ProjectionOperator(
+                                new SelectionOperator(
+                                                moviesScan,
+                                                new RangePredicate("Movies.title", startRange, endRange)),
+                                new String[] { "Movies.movieId", "Movies.title" },
+                                new String[] { "Movies.movieId", "Movies.title" });
+
+                // Create operators for WorkedOn with filtering
+                ScanOperator workedOnScan = new ScanOperator(
+                                bufferManager,
+                                WORKEDON_FILE,
+                                PageFactory.TableType.WORKEDON,
+                                new String[] { "WorkedOn.movieId", "WorkedOn.personId", "WorkedOn.category" });
+
+                SelectionOperator workedOnCategorySelection = new SelectionOperator(
+                                workedOnScan,
+                                new EqualityPredicate("WorkedOn.category", "director"));
+
+                ProjectionOperator workedOnProjection = new ProjectionOperator(
+                                workedOnCategorySelection,
+                                new String[] { "WorkedOn.movieId", "WorkedOn.personId" },
+                                new String[] { "WorkedOn.movieId", "WorkedOn.personId", "WorkedOn.category" });
+
+                // Set a smaller buffer size for materialization to avoid excessive I/O
+                if (matchingMovieCount < 100) {
+                        // For small result sets, use a small file to save I/O
+                        workedOnProjection.setMaterialize(bufferManager, "imdb_temp_small_workedon.bin");
+                } else {
+                        // For larger result sets, use the standard file
+                        workedOnProjection.setMaterialize(bufferManager, TEMP_FILTERED_WORKEDON_FILE);
+                }
+
+                // Join Movies with WorkedOn
+                BlockNestedLoopJoinOperator moviesWorkedOnJoin = new BlockNestedLoopJoinOperator(
+                                moviesProjection,
+                                workedOnProjection,
+                                new JoinPredicate("Movies.movieId", "WorkedOn.movieId"),
+                                bufferManager,
+                                bufferSize,
+                                -1);
+
+                // Create operator for People table
+                ScanOperator peopleScan = new ScanOperator(
+                                bufferManager,
+                                PEOPLE_FILE,
+                                PageFactory.TableType.PEOPLE,
+                                new String[] { "People.personId", "People.name" });
+
+                // Join with People table
+                BlockNestedLoopJoinOperator peopleJoin = new BlockNestedLoopJoinOperator(
+                                moviesWorkedOnJoin,
+                                peopleScan,
+                                new JoinPredicate("WorkedOn.personId", "People.personId"),
+                                bufferManager,
+                                bufferSize,
+                                -2);
+
+                // Create final projection
+                ProjectionOperator finalProjection = new ProjectionOperator(
+                                peopleJoin,
+                                new String[] { "Movies.title", "People.name" },
+                                new String[] { "Movies.movieId", "Movies.title", "WorkedOn.movieId",
+                                                "WorkedOn.personId",
+                                                "People.personId", "People.name" });
+
+                try {
+                        // Execute query
+                        long startTime = System.currentTimeMillis();
+                        finalProjection.open();
+
+                        // Print results in CSV format
+                        System.out.println("title,name");
+                        Tuple result;
+                        int resultCount = 0;
+
+                        while ((result = finalProjection.next()) != null) {
+                                System.out.println(result.toCsv());
+                                resultCount++;
+
+                                if (resultCount % 10000 == 0) {
+                                        System.err.println("Processed " + resultCount + " results...");
+                                }
+                        }
+
+                        long endTime = System.currentTimeMillis();
+                        System.out.println("Query returned " + resultCount + " results in " +
+                                        (endTime - startTime) + " ms");
+
+                        finalProjection.close();
+                } catch (Exception e) {
+                        System.err.println("Error executing optimized query: " + e.getMessage());
+                        e.printStackTrace();
+                }
+        }
 }

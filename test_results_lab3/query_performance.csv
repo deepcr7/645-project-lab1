@@ -1,0 +1,4 @@
+Test Case,Start Range,End Range,Description,Execution Time (ms),Measured I/O,Estimated I/O,Selectivity,Results Count
+Z-Z,Z,Z,Very small range,97508,955595,1395599,0.0000,26
+X-Y,X,Y,Small range,173027,955595,1395671,0.0007,3031
+S-T,S,T,Medium range,840275,955595,1401545,0.0549,270002

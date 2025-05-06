@@ -53,6 +53,68 @@ public class ProjectionOperator implements Operator {
             }
         }
     }
+    // Modify ProjectionOperator.java - Add optimized materialization for WorkedOn
+    // Add this method to your ProjectionOperator class
+
+    private void materializeOutputOptimized() {
+        System.out.println("Starting optimized materialization to file: " + tempTableFile);
+
+        try {
+            // Delete existing file if it exists
+            File file = new File(tempTableFile);
+            if (file.exists()) {
+                file.delete();
+            }
+
+            // Ensure directory exists
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+
+            // Create a new materialized table
+            materializedTable = new MaterializedTable(bufferManager, tempTableFile, outputColumnNames);
+            materializedTable.open();
+            System.out.println("Materialized table opened successfully");
+
+            // Read all tuples from the child operator, project them, and insert them
+            // into the materialized table
+            Tuple inputTuple;
+            int tupleCount = 0;
+            long startTime = System.currentTimeMillis();
+            int reportInterval = 1000000; // Log every million rows
+
+            while ((inputTuple = childOperator.next()) != null) {
+                Tuple projectedTuple = projectTuple(inputTuple);
+                materializedTable.insert(projectedTuple);
+                tupleCount++;
+
+                if (tupleCount % reportInterval == 0) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    double rate = tupleCount / (elapsed / 1000.0);
+                    System.out.println("Materialized " + tupleCount + " tuples... (" +
+                            String.format("%.2f", rate) + " tuples/sec)");
+                }
+            }
+            materializedTupleCount = tupleCount;
+            long elapsed = System.currentTimeMillis() - startTime;
+            double rate = tupleCount / (elapsed / 1000.0);
+            System.out.println("Materialized " + tupleCount + " tuples total in " +
+                    elapsed + "ms (" + String.format("%.2f", rate) + " tuples/sec)");
+
+            // Force all pages to disk
+            bufferManager.force(tempTableFile);
+
+            // Reset the materialized table for reading
+            materializedTable.reset();
+            System.out.println("Reset complete - ready to read from materialized table");
+
+        } catch (Exception e) {
+            System.err.println("Error during materialization: " + e.getMessage());
+            e.printStackTrace();
+            materializedTable = null;
+        }
+    }
 
     /**
      * Configures this projection operator to materialize its output into a
@@ -147,7 +209,6 @@ public class ProjectionOperator implements Operator {
     }
 
     private void materializeOutput() {
-        System.out.println("Starting materialization to file: " + tempTableFile);
 
         try {
             // Delete existing file if it exists
@@ -177,9 +238,6 @@ public class ProjectionOperator implements Operator {
                 Tuple projectedTuple = projectTuple(inputTuple);
                 materializedTable.insert(projectedTuple);
                 tupleCount++;
-                if (tupleCount % 1000000 == 0) {
-                    System.out.println("Materialized " + tupleCount + " tuples...");
-                }
             }
             materializedTupleCount = tupleCount;
             System.out.println("Materialized " + tupleCount + " tuples total");
@@ -189,7 +247,6 @@ public class ProjectionOperator implements Operator {
 
             // Reset the materialized table for reading
             materializedTable.reset();
-            System.out.println("Reset complete - ready to read from materialized table");
 
         } catch (Exception e) {
             System.err.println("Error during materialization: " + e.getMessage());
