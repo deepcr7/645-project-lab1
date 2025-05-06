@@ -3,28 +3,28 @@
 ## Team Members and Contributions
 
 - **Deepesh Suranjandass** (dsuranjandass@umass.edu)
- - Designed and implemented the core query execution engine
- - Developed the Block Nested Loop Join operator
- - Implemented buffer management for block handling
- - Created the hash table implementation for join operations
- - Fixed critical bugs in the materialization pipeline
- - Optimized the query execution for range predicates
+- Designed and implemented the core query execution engine
+- Developed the Block Nested Loop Join operator
+- Implemented buffer management for block handling
+- Created the hash table implementation for join operations
+- Fixed critical bugs in the materialization pipeline
+- Optimized the query execution for range predicates
 
 - **Ajith Krishna Kanduri** (akanduri@umass.edu)
- - Implemented the Projection operator with materialization capability
- - Developed the Selection operator and predicate handling
- - Created the ScanOperator for base table access
- - Added support for selective materialization based on query ranges
- - Implemented I/O counting mechanisms for performance evaluation
- - Contributed to the formula for analytical cost estimation
+- Implemented the Projection operator with materialization capability
+- Developed the Selection operator and predicate handling
+- Created the ScanOperator for base table access
+- Added support for selective materialization based on query ranges
+- Implemented I/O counting mechanisms for performance evaluation
+- Contributed to the formula for analytical cost estimation
 
 - **Spoorthi Siri Malladi** (smalladi@umass.edu)
- - Implemented the table schema definitions for Movies, WorkedOn and People
- - Created the custom page implementations for different table types
- - Developed data loading utilities for IMDB datasets
- - Implemented error handling and recovery mechanisms
- - Contributed to comparison testing with PostgreSQL
- - Created the visualization system for performance metrics
+- Implemented the table schema definitions for Movies, WorkedOn and People
+- Created the custom page implementations for different table types
+- Developed data loading utilities for IMDB datasets
+- Implemented error handling and recovery mechanisms
+- Contributed to comparison testing with PostgreSQL
+- Created the visualization system for performance metrics
 
 ## Design Choices
 
@@ -66,7 +66,7 @@ mvn clean package
 java -Xmx8g -cp target/classes buffermanager.PreProcess 10000
 
 # Run a query with specified title range and buffer size
-java -Xmx8g -cp target/classes buffermanager.RunQuery A B 10000
+java -Xmx8g -cp target/classes buffermanager.OptimizedRunQuery A B 10000
 
 # Run the optimized query implementation (recommended for large datasets)
 java -Xmx8g -cp target/classes buffermanager.OptimizedRunQuery A B 10000
@@ -76,3 +76,4 @@ java -Xmx8g -cp target/classes buffermanager.PerformanceTestLab3 10000
 
 # Compare results with PostgreSQL (after setting up PostgreSQL with the same data)
 ./compare_results.sh
+```

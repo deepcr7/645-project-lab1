@@ -57,12 +57,9 @@ public class BlockNestedLoopJoinOperator implements Operator {
         this.hashTable = new HashMap<>();
         this.currentBlock = new ArrayList<>();
         this.tempPages = new ArrayList<>();
-        // Set block size to (B-C)/2 where B is buffer size and C is number of frames
-        // used for input
-        // For simplicity, we'll assume C = 2 (one for inner, one for output)
         this.blockSizeInPages = (bufferSize - 2) / 2;
         if (this.blockSizeInPages < 1) {
-            this.blockSizeInPages = 1; // Ensure at least one page in the block
+            this.blockSizeInPages = 1;
         }
         this.endOfOuterRelation = false;
         this.currentOuterIndex = 0;
@@ -111,8 +108,6 @@ public class BlockNestedLoopJoinOperator implements Operator {
 
         // Get the next matching tuple
         while (true) {
-            // If we've exhausted all inner tuples for the current outer tuple, move to the
-            // next outer tuple
             if (currentInnerTuple == null) {
                 // If we've exhausted the current block, load the next block
                 if (currentOuterIndex >= currentBlock.size()) {
@@ -261,17 +256,12 @@ public class BlockNestedLoopJoinOperator implements Operator {
         while (pageIndex >= tempPages.size() && tempPages.size() < blockSizeInPages) {
             tempPages.add(new PageImpl(tempPages.size()));
         }
-
-        // In a real implementation, we'd serialize the tuple and store it in the page
-        // For this implementation, we just use the currentBlock list directly
     }
 
     /**
      * Releases all temporary pages used by this operator.
      */
     private void releaseTemporaryPages() {
-        // In a real implementation with a buffer manager, we would unpin each
-        // temporary page to allow it to be evicted
         tempPages.clear();
     }
 }
